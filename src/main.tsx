@@ -1,3 +1,4 @@
+// src/main.tsx
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
@@ -12,19 +13,69 @@ import Notifications from "@/pages/Notifications";
 import Chat from "@/pages/Chat";
 import Insurance from "@/pages/Insurance";
 import Drugs from "@/pages/Drugs";
+import Protected from "@/routes/Protected";
 
 document.documentElement.lang = "ar";
 document.documentElement.dir = "rtl";
 
 const router = createBrowserRouter([
-  { path: "/", element: <Home /> },
+  { path: "/home", element: <Home /> },
   { path: "/login", element: <Login /> },
   { path: "/register", element: <Register /> },
-  { path: "/dashboard", element: <Dashboard /> },
-  { path: "/insurance", element: <Insurance /> },
-  { path: "/drugs", element: <Drugs /> },
-  { path: "/notifications", element: <Notifications /> },
-  { path: "/chat", element: <Chat /> },
+
+  {
+    path: "/dashboard",
+    element: (
+      <Protected>
+        <Dashboard />
+      </Protected>
+    ),
+  },
+  {
+    path: "/insurance",
+    element: (
+      <Protected>
+        <Insurance />
+      </Protected>
+    ),
+  },
+  {
+    path: "/drugs",
+    element: (
+      <Protected>
+        <Drugs />
+      </Protected>
+    ),
+  },
+  {
+    path: "/notifications",
+    element: (
+      <Protected>
+        <Notifications />
+      </Protected>
+    ),
+  },
+  {
+    path: "/chat",
+    element: (
+      <Protected>
+        <Chat />
+      </Protected>
+    ),
+  },
+
+  // 404
+  {
+    path: "*",
+    element: (
+      <div style={{ padding: 32, textAlign: "center" }}>
+        الصفحة غير موجودة —{" "}
+        <a href="/" style={{ color: "#0D16D1" }}>
+          العودة للرئيسية
+        </a>
+      </div>
+    ),
+  },
 ]);
 
 ReactDOM.createRoot(document.getElementById("root")!).render(

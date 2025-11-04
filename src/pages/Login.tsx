@@ -39,7 +39,7 @@ export default function Login() {
       "haseef_auth",
       JSON.stringify({ nationalId: user.nationalId, at: Date.now() })
     );
-    navigate("/dashboard");
+    navigate("/home");
   };
 
   return (
