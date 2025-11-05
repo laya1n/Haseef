@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field, validator
 
 class UserCreate(BaseModel):
+    name: str
     national_id: str = Field(..., description="Saudi National ID - must be 10 digits")
     password: str = Field(..., min_length=6, description="Password must be at least 6 characters")
 
