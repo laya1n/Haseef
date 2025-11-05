@@ -21,6 +21,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     if existing:
         raise HTTPException(status_code=400, detail="National ID already registered")
 
+    password = user.password[:72]
     hashed_pw = pwd_context.hash(user.password)
     new_user = User(name=user.name, national_id=user.national_id, password=hashed_pw)
     db.add(new_user)
