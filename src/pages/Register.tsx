@@ -50,7 +50,6 @@ export default function Register() {
       return "صيغة البريد غير صحيحة.";
     if (password.length < 6) return "كلمة المرور يجب ألا تقل عن 6 أحرف.";
     if (password !== confirm) return "كلمتا المرور غير متطابقتين.";
-    if (!agree) return "الرجاء الموافقة على الشروط.";
     return "";
   };
 
@@ -68,6 +67,7 @@ export default function Register() {
       email: email.trim(),
       password,
     };
+<<<<<<< HEAD
     //localStorage.setItem("haseef_user", JSON.stringify(payload));
     //setOk("تم إنشاء الحساب بنجاح! سيتم تحويلك لتسجيل الدخول.");
     //setTimeout(() => navigate("/login"), 900);
@@ -89,6 +89,11 @@ export default function Register() {
     setErr("تعذر الاتصال بالخادم. تأكد من أن الخادم يعمل.");
   }
 
+=======
+    localStorage.setItem("haseef_user", JSON.stringify(payload));
+    setOk("تم إنشاء الحساب بنجاح! سيتم تحويلك لتسجيل الدخول.");
+    setTimeout(() => navigate("/"), 900);
+>>>>>>> c4e9d5a (Updated pages)
   };
 
   return (
@@ -226,18 +231,6 @@ export default function Register() {
               </button>
             </div>
           </div>
-
-          {/* الموافقة على الشروط */}
-          <label className="flex items-center gap-2 text-sm text-black/70 select-none">
-            <input
-              type="checkbox"
-              checked={agree}
-              onChange={(e) => setAgree(e.target.checked)}
-              className="size-4 rounded border-black/30"
-            />
-            أوافق على الشروط وسياسة الخصوصية.
-          </label>
-
           {/* رسائل */}
           {err && (
             <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
