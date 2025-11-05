@@ -3,6 +3,7 @@ from Backend.database import Base, engine
 from Backend.routes import auth
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 
 Base.metadata.create_all(bind=engine)
 
@@ -17,3 +18,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=400,
         content={"error": msg}
     )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
