@@ -12,7 +12,7 @@ import {
 
 /* ============================== Types ============================== */
 type StoredUser = {
-  nationalId: string;
+  national_id: string;
   password: string;
   name?: string;
   email?: string;
@@ -34,7 +34,7 @@ const REDIRECT_PATH = "/home";
 export default function Login() {
   const navigate = useNavigate();
 
-  const [nationalId, setNationalId] = useState("");
+  const [national_id, setNationalId] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [remember, setRemember] = useState(true);
@@ -43,8 +43,8 @@ export default function Login() {
   const [ok, setOk] = useState("");
 
   const canSubmit = useMemo(
-    () => isValidSaudiNID(nationalId) && password.trim().length > 0 && !loading,
-    [nationalId, password, loading]
+    () => isValidSaudiNID(national_id) && password.trim().length > 0 && !loading,
+    [national_id, password, loading]
   );
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -52,7 +52,7 @@ export default function Login() {
     setErr("");
     setOk("");
 
-    if (!isValidSaudiNID(nationalId)) {
+    if (!isValidSaudiNID(national_id)) {
       setErr("رقم الهوية يجب أن يتكون من 10 أرقام.");
       return;
     }
@@ -71,7 +71,7 @@ export default function Login() {
     const res = await fetch("https://haseef.onrender.com/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nationalId, password }),
+      body: JSON.stringify({ national_id, password }),
     });
 
     const data = await res.json();
@@ -95,7 +95,7 @@ export default function Login() {
   //  } this is commented because now the backend is doing the actual authentication no need for local checks
 
     setLoading(true);
-    const token = { nationalId, at: Date.now() };
+    const token = { national_id, at: Date.now() };
 
     if (remember) localStorage.setItem("haseef_auth", JSON.stringify(token));
     else sessionStorage.setItem("haseef_auth", JSON.stringify(token));
@@ -145,7 +145,7 @@ export default function Login() {
               <input
                 id="national-id"
                 name="national-id"
-                value={nationalId}
+                value={national_id}
                 onChange={(e) => {
                   const ascii = normalizeDigits(e.target.value);
                   const only = ascii.replace(/[^0-9]/g, "");
@@ -159,7 +159,7 @@ export default function Login() {
                 className="w-full h-12 pr-12 pl-4 rounded-xl border border-black/10 bg-white text-[15px]
                            focus:outline-none focus:ring-4 focus:ring-[#92E3A9]/30 transition-all"
               />
-              {!nationalId && (
+              {!national_id && (
                 <span
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-[#92E3A9]"
                   aria-hidden="true"
@@ -168,7 +168,7 @@ export default function Login() {
                 </span>
               )}
             </div>
-            {!isValidSaudiNID(nationalId) && nationalId.length > 0 && (
+            {!isValidSaudiNID(national_id) && national_id.length > 0 && (
               <p className="mt-1 text-xs text-red-600">يجب أن يكون 10 أرقام.</p>
             )}
           </div>

@@ -13,7 +13,7 @@ import {
 
 type NewUser = {
   name: string;
-  nationalId: string;
+  national_id: string;
   email?: string;
   password: string;
 };
@@ -28,7 +28,7 @@ export default function Register() {
   const navigate = useNavigate();
 
   const [name, setName] = useState("");
-  const [nationalId, setNationalId] = useState("");
+  const [national_id, setNationalId] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -44,7 +44,7 @@ export default function Register() {
     setOk("");
 
     if (!name.trim()) return "الاسم مطلوب.";
-    if (!/^\d{10}$/.test(nationalId))
+    if (!/^\d{10}$/.test(national_id))
       return "رقم الهوية يجب أن يتكون من 10 أرقام.";
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
       return "صيغة البريد غير صحيحة.";
@@ -64,7 +64,7 @@ export default function Register() {
 
     const payload: NewUser = {
       name: name.trim(),
-      nationalId,
+      national_id,
       email: email.trim(),
       password,
     };
@@ -140,7 +140,7 @@ export default function Register() {
             </label>
             <div className="relative mt-1">
               <input
-                value={nationalId}
+                value={national_id}
                 onChange={(e) => {
                   const ascii = normalizeDigits(e.target.value);
                   setNationalId(ascii.replace(/\D/g, "").slice(0, 10));
@@ -151,7 +151,7 @@ export default function Register() {
                 placeholder="10 أرقام"
                 className="w-full h-12 pr-12 pl-4 rounded-xl border border-black/10 bg-white text-[15px] focus:outline-none focus:ring-4 focus:ring-[#92E3A9]/30"
               />
-              {!nationalId && (
+              {!national_id && (
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#92E3A9]">
                   <IdCard className="size-5" />
                 </span>
