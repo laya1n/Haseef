@@ -54,7 +54,7 @@ export default function Register() {
     return "";
   };
 
-  const onSubmit = (e: React.FormEvent) => {
+  const onSubmit = async(e: React.FormEvent) => {
     e.preventDefault();
     const v = validate();
     if (v) {
@@ -68,9 +68,27 @@ export default function Register() {
       email: email.trim(),
       password,
     };
-    localStorage.setItem("haseef_user", JSON.stringify(payload));
-    setOk("تم إنشاء الحساب بنجاح! سيتم تحويلك لتسجيل الدخول.");
-    setTimeout(() => navigate("/login"), 900);
+    //localStorage.setItem("haseef_user", JSON.stringify(payload));
+    //setOk("تم إنشاء الحساب بنجاح! سيتم تحويلك لتسجيل الدخول.");
+    //setTimeout(() => navigate("/login"), 900);
+    try {
+        const res = await fetch("https://haseef.onrender.com/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+  if (res.ok) {
+        setOk("تم إنشاء الحساب بنجاح! سيتم تحويلك لتسجيل الدخول.");
+        setTimeout(() => navigate("/login"), 900);
+      } else {
+        const data = await res.json();
+        setErr(data.detail || "حدث خطأ أثناء التسجيل.");
+    }
+  } catch (error) {
+    setErr("تعذر الاتصال بالخادم. تأكد من أن الخادم يعمل.");
+  }
+
   };
 
   return (

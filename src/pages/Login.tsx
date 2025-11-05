@@ -47,7 +47,7 @@ export default function Login() {
     [nationalId, password, loading]
   );
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErr("");
     setOk("");
@@ -61,20 +61,41 @@ export default function Login() {
       return;
     }
 
-    const raw = localStorage.getItem("haseef_user");
-    if (!raw) {
-      setErr("لا يوجد حساب مسجل. الرجاء إنشاء حساب أولاً.");
-      return;
+    //const raw = localStorage.getItem("haseef_user");
+    //if (!raw) {
+    //  setErr("لا يوجد حساب مسجل. الرجاء إنشاء حساب أولاً.");
+    //  return;
+    //}
+    setLoading(true);
+  try {
+    const res = await fetch("https://haseef.onrender.com/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nationalId, password }),
+    });
+
+    const data = await res.json();
+
+    if (res.ok) {
+      setOk("تم تسجيل الدخول بنجاح.");
+      setTimeout(() => navigate(REDIRECT_PATH), 700);
+    } else {
+      setErr(data.detail || "رقم الهوية أو كلمة المرور غير صحيحة.");
+    }
+  } catch (error) {
+    setErr("تعذر الاتصال بالخادم.");
+  } finally {
+    setLoading(false);
     }
 
-    const user: StoredUser = JSON.parse(raw);
-    if (user.nationalId !== nationalId || user.password !== password) {
-      setErr("رقم الهوية أو كلمة المرور غير صحيحة.");
-      return;
-    }
+  //  const user: StoredUser = JSON.parse(raw);
+  //  if (user.nationalId !== nationalId || user.password !== password) {
+  //    setErr("رقم الهوية أو كلمة المرور غير صحيحة.");
+  //    return;
+  //  } this is commented because now the backend is doing the actual authentication no need for local checks
 
     setLoading(true);
-    const token = { nationalId: user.nationalId, at: Date.now() };
+    const token = { nationalId, at: Date.now() };
 
     if (remember) localStorage.setItem("haseef_auth", JSON.stringify(token));
     else sessionStorage.setItem("haseef_auth", JSON.stringify(token));
