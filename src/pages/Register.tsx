@@ -72,7 +72,7 @@ export default function Register() {
     //setOk("تم إنشاء الحساب بنجاح! سيتم تحويلك لتسجيل الدخول.");
     //setTimeout(() => navigate("/login"), 900);
     try {
-        const res = await fetch("https://haseef.onrender.com/register", {
+        const res = await fetch("https://haseef.onrender.com/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
