@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
-from database import Base, engine
-from routes import auth
+from Backend.database import Base, engine
+from Backend.routes import auth
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
 
