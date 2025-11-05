@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
-  UserRound,
   Plus,
   Shield,
   Pill,
@@ -16,11 +15,20 @@ import {
   Info,
   X,
   Archive,
+  Home,
 } from "lucide-react";
 import clsx from "clsx";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-/* ======================== Types ======================== */
+/* ============================== الهوية البصرية (مطابقة للداشبورد) ============================== */
+const brand = {
+  green: "#0E6B43",
+  greenHover: "#0f7d4d",
+  accent: "#97FC4A",
+  secondary: "#0D16D1",
+};
+
+/* ============================== الأنواع ============================== */
 type Kind = "طبي" | "تأمين" | "دواء";
 type Severity = "طارئ" | "تنبيه" | "معلومة";
 
@@ -34,48 +42,64 @@ export type Noti = {
   read: boolean;
 };
 
-/* ======================== API Helpers ======================== */
-/** عدّل هذا المتغير أو استخدم proxy في devServer */
-const API_BASE = import.meta.env.VITE_API_BASE ?? "";
+/* ============================== إعدادات API (مطابقة لطريقة Dashboard) ============================== */
+const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-// REST endpoints المقترحة:
-// GET    /api/notifications?kind=&severity=&q=
-// POST   /api/notifications/:id/mark-read {read:boolean}
-// DELETE /api/notifications/:id
-// POST   /api/notifications/mark-all-read
-// DELETE /api/notifications           (clear all)
-// SSE    /api/notifications/stream
-
-async function apiGet(path: string) {
-  const res = await fetch(`${API_BASE}${path}`);
-  if (!res.ok) throw new Error(await res.text());
-  return res.json();
+function buildUrl(path: string, params?: Record<string, string | undefined>) {
+  const url = new URL(BASE_URL + path || path, window.location.origin);
+  if (params) {
+    for (const [k, v] of Object.entries(params)) {
+      if (v && v !== "الكل") url.searchParams.set(k, v);
+    }
+  }
+  return url.toString();
 }
-async function apiPost(path: string, body?: any) {
-  const res = await fetch(`${API_BASE}${path}`, {
+
+async function httpGet<T>(path: string, params?: Record<string, string>) {
+  const res = await fetch(buildUrl(path, params), { credentials: "include" });
+  if (!res.ok) throw new Error(await res.text());
+  return (await res.json()) as T;
+}
+
+async function httpPost<T>(path: string, body?: unknown) {
+  const res = await fetch(BASE_URL + path || path, {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) throw new Error(await res.text());
-  return res.json().catch(() => ({}));
-}
-async function apiDelete(path: string) {
-  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
-  if (!res.ok) throw new Error(await res.text());
-  return res.json().catch(() => ({}));
+  // قد لا يعيد الخادم JSON دائمًا
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return {} as T;
+  }
 }
 
-/* ======================== Page ======================== */
+async function httpDelete<T>(path: string) {
+  const res = await fetch(BASE_URL + path || path, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(await res.text());
+  try {
+    return (await res.json()) as T;
+  } catch {
+    return {} as T;
+  }
+}
+
+/* ============================== الصفحة ============================== */
 export default function Notifications() {
   const navigate = useNavigate();
 
-  // بيانات حقيقية من API (بدون seed)
+  // بيانات
   const [items, setItems] = useState<Noti[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // UI state
+  // واجهة
   const [q, setQ] = useState("");
   const [filterKind, setFilterKind] = useState<"الكل" | Kind>("الكل");
   const [filterSev, setFilterSev] = useState<"الكل" | Severity>("الكل");
@@ -83,20 +107,18 @@ export default function Notifications() {
     "كل الإشعارات"
   );
 
-  // تحميل أولي
+  // تحميل أولي بنفس الأسلوب
   useEffect(() => {
     let mounted = true;
     (async () => {
       try {
         setLoading(true);
         setError(null);
-        const data: Noti[] = await apiGet(
-          `/api/notifications?kind=${encodeURIComponent(
-            filterKind === "الكل" ? "" : filterKind
-          )}&severity=${encodeURIComponent(
-            filterSev === "الكل" ? "" : filterSev
-          )}&q=${encodeURIComponent(q)}`
-        );
+        const data = await httpGet<Noti[]>("/api/notifications", {
+          kind: filterKind,
+          severity: filterSev,
+          q,
+        });
         if (mounted) setItems(data);
       } catch (e: any) {
         if (mounted) setError(e?.message ?? "فشل جلب الإشعارات");
@@ -107,27 +129,27 @@ export default function Notifications() {
     return () => {
       mounted = false;
     };
-    // مبدئيًا نجلب عند فتح الصفحة فقط. لو رغبت: أضف [q, filterKind, filterSev]
-    // لعمل فلترة على الخادم.
+    // نجلب مرة واحدة مبدئيًا (يمكن لاحقًا ربط الفلاتر بالخادم)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // SSE للاشعارات الفورية من الـAI
+  // SSE للبث الفوري
   const sseRef = useRef<EventSource | null>(null);
   useEffect(() => {
-    const url = `${API_BASE}/api/notifications/stream`;
+    const url = BASE_URL
+      ? BASE_URL + "/api/notifications/stream"
+      : "/api/notifications/stream";
     try {
       const es = new EventSource(url);
       sseRef.current = es;
       es.onmessage = (evt) => {
         try {
           const n: Noti = JSON.parse(evt.data);
-          // ادراج تفاؤلي أعلى القائمة
           setItems((prev) => [n, ...prev]);
         } catch {}
       };
       es.onerror = () => {
-        // يمكن إعادة المحاولة تلقائيًا حسب حاجتك
+        // يمكن إضافة إعادة محاولة بعد فترة
       };
     } catch {}
     return () => {
@@ -154,14 +176,14 @@ export default function Notifications() {
     });
   }, [items, q, filterKind, filterSev, tab]);
 
-  /* -------- Actions (Optimistic) -------- */
+  /* -------- إجراءات متفائلة (مطابقة أسلوب الداشبورد) -------- */
   const markAllRead = async () => {
     const prev = items;
     setItems((arr) => arr.map((n) => ({ ...n, read: true })));
     try {
-      await apiPost("/api/notifications/mark-all-read");
+      await httpPost("/api/notifications/mark-all-read");
     } catch {
-      setItems(prev); // rollback
+      setItems(prev);
     }
   };
 
@@ -169,7 +191,7 @@ export default function Notifications() {
     const prev = items;
     setItems([]);
     try {
-      await apiDelete("/api/notifications");
+      await httpDelete("/api/notifications");
     } catch {
       setItems(prev);
     }
@@ -183,7 +205,7 @@ export default function Notifications() {
       arr.map((n) => (n.id === id ? { ...n, read: nextRead } : n))
     );
     try {
-      await apiPost(`/api/notifications/${id}/mark-read`, { read: nextRead });
+      await httpPost(`/api/notifications/${id}/mark-read`, { read: nextRead });
     } catch {
       setItems(prev);
     }
@@ -193,23 +215,28 @@ export default function Notifications() {
     const prev = items;
     setItems((arr) => arr.filter((n) => n.id !== id));
     try {
-      await apiDelete(`/api/notifications/${id}`);
+      await httpDelete(`/api/notifications/${id}`);
     } catch {
       setItems(prev);
     }
   };
 
   return (
-    <div className="min-h-screen bg-[#EEF1F8]">
-      <div className="grid grid-cols-[300px_1fr]">
-        {/* Sidebar */}
+    <div
+      className="min-h-screen"
+      style={{
+        background:
+          "linear-gradient(180deg, #F5F7FB 0%, #E9EDF5 100%), radial-gradient(800px 500px at 15% 8%, rgba(146,227,169,0.15), transparent 60%)",
+      }}
+    >
+      <div className="grid grid-cols-[280px_1fr]">
+        {/* Sidebar — مطابق للداشبورد */}
         <aside
           className="min-h-screen border-l bg-white sticky top-0"
           dir="rtl"
         >
           <div className="p-6 pb-4 flex items-center justify-between">
             <div className="text-2xl font-semibold">الشعار</div>
-            <UserRound className="size-6 text-black/70" />
           </div>
 
           <nav className="px-4 space-y-2">
@@ -232,7 +259,6 @@ export default function Notifications() {
               active
               icon={<BellRing className="size-4" />}
               label="إشعارات"
-              onClick={() => {}}
             />
             <SideItem
               icon={<MessageSquareCode className="size-4" />}
@@ -245,7 +271,8 @@ export default function Notifications() {
             <button
               onClick={() => {
                 localStorage.removeItem("haseef_auth");
-                navigate("/login");
+                sessionStorage.removeItem("haseef_auth");
+                navigate("/");
               }}
               className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg-black/5"
             >
@@ -256,20 +283,34 @@ export default function Notifications() {
         </aside>
 
         {/* Main */}
-        <main className="p-6 md:p-8" dir="rtl">
+        <main className="p-6 md:p-8 relative" dir="rtl">
+          {/* زر الرجوع للهوم — نفس الشكل والألوان */}
+          <button
+            onClick={() => navigate("/home")}
+            className="absolute top-3 right-4 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition"
+            title="العودة للصفحة الرئيسية"
+          >
+            <Home className="size-5" style={{ color: brand.green }} />
+          </button>
+
           {/* Header */}
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 mt-3">
             <div className="flex items-center gap-3">
-              <h1 className="text-xl md:text-2xl font-semibold">الإشعارات</h1>
+              <h1
+                className="text-xl md:text-2xl font-semibold"
+                style={{ color: brand.green }}
+              >
+                الإشعارات
+              </h1>
               <span className="inline-flex items-center rounded-full bg-[#E7F3FF] text-[#0D16D1] text-xs px-2 py-0.5">
                 غير المقروءة: {unreadCount}
               </span>
             </div>
 
-            {/* Search */}
+            {/* Search — نفس مدخل البحث */}
             <div className="relative w-[320px] max-w-[45vw]">
               <input
-                className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50"
+                className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50 focus:ring-4 focus:ring-emerald-300/30"
                 placeholder="ابحث في الإشعارات…"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
@@ -278,7 +319,7 @@ export default function Notifications() {
             </div>
           </div>
 
-          {/* Tabs */}
+          {/* Tabs — بنفس أسلوب الأزرار الملوّنة */}
           <div className="mt-4 flex flex-wrap gap-2">
             {(["كل الإشعارات", "غير المقروءة", "المحفوظة"] as const).map(
               (t) => (
@@ -298,21 +339,19 @@ export default function Notifications() {
             )}
           </div>
 
-          {/* Filters row */}
+          {/* فلاتر — أزرار/قوائم خضراء بنفس هوية الداشبورد */}
           <div className="mt-4 flex items-end gap-2">
-            <FilterSelect
+            <Dropdown
               label="النوع"
               value={filterKind}
-              onChange={setFilterKind}
+              onChange={(v) => setFilterKind(v as any)}
               options={["الكل", "طبي", "تأمين", "دواء"]}
-              placeholder="نوع الإشعار"
             />
-            <FilterSelect
+            <Dropdown
               label="الأهمية"
               value={filterSev}
-              onChange={setFilterSev}
+              onChange={(v) => setFilterSev(v as any)}
               options={["الكل", "طارئ", "تنبيه", "معلومة"]}
-              placeholder="مستوى الأهمية"
             />
 
             <div className="ms-auto flex items-center gap-2">
@@ -331,7 +370,7 @@ export default function Notifications() {
             </div>
           </div>
 
-          {/* List */}
+          {/* القائمة */}
           <Card className="mt-5 shadow-soft">
             <CardHeader className="pb-2">
               <CardTitle className="text-base">قائمة الإشعارات</CardTitle>
@@ -384,7 +423,7 @@ export default function Notifications() {
                           </div>
                         </div>
 
-                        {/* Actions */}
+                        {/* إجراءات */}
                         <div className="ms-auto flex items-center gap-2">
                           <ActionIcon
                             icon={<CheckCircle2 className="size-4" />}
@@ -419,7 +458,9 @@ export default function Notifications() {
   );
 }
 
-/* ======================== Small components ======================== */
+/* ============================== مكوّنات صغيرة (مطابقة لنمط الداشبورد) ============================== */
+
+// عنصر القائمة الجانبية
 function SideItem({
   icon,
   label,
@@ -438,7 +479,7 @@ function SideItem({
         "w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3 transition-colors",
         active ? "text-[#0D16D1] border border-black/10" : "hover:bg-black/5"
       )}
-      style={active ? { backgroundColor: "#97FC4A" } : {}}
+      style={active ? { backgroundColor: brand.accent } : {}}
     >
       <span className="font-medium">{label}</span>
       <span className="opacity-80">{icon}</span>
@@ -446,54 +487,74 @@ function SideItem({
   );
 }
 
-function FilterSelect({
+// Dropdown الأخضر (نفس شكل الداشبورد)
+function Dropdown({
   label,
   value,
   onChange,
   options,
-  placeholder,
-  id,
-  minWidth = "min-w-[10rem]",
 }: {
   label: string;
   value: string;
-  onChange: (v: any) => void;
+  onChange: (v: string) => void;
   options: string[];
-  placeholder: string;
-  id?: string;
-  minWidth?: string;
 }) {
-  const selectId = id ?? `select-${label}`;
-  return (
-    <div className={clsx("flex flex-col gap-1", minWidth)}>
-      <label htmlFor={selectId} className="text-xs text-black/60 pr-1">
-        {label}
-      </label>
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
 
-      <div className="relative inline-block w-full">
-        <select
-          id={selectId}
-          dir="rtl"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="
-            pr-9 h-10 w-full
-            rounded-2xl border border-black/10 shadow-md
-            text-sm
-            bg-[#0F6B46] text-white
-            hover:brightness-95
-            focus:outline-none focus:ring-4 focus:ring-emerald-300/30
-            [appearance:none] [-moz-appearance:none] [-webkit-appearance:none]
-          "
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
+  return (
+    <div className="relative min-w-[8rem]" ref={ref}>
+      <label className="text-xs text-black/60 pr-1 block mb-1">{label}</label>
+      <button
+        type="button"
+        onClick={() => setOpen((s) => !s)}
+        className="h-10 w-full rounded-full bg-[#0E6B43] text-white font-semibold px-4 flex items-center justify-between text-sm shadow-md hover:bg-[#0f7d4d] transition"
+      >
+        <span className="truncate">{value}</span>
+        <svg
+          className={clsx("size-4 transition-transform", open && "rotate-180")}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
         >
-          <option hidden>{placeholder}</option>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
+
+      {open && (
+        <ul className="absolute mt-2 w-full bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden z-50">
           {options.map((opt) => (
-            <option key={opt} value={opt} className="bg-white text-black">
-              {opt}
-            </option>
+            <li key={opt}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(opt);
+                  setOpen(false);
+                }}
+                className={clsx(
+                  "w-full text-right px-4 py-2 text-sm hover:bg-emerald-50",
+                  value === opt && "bg-emerald-50 font-semibold text-[#0E6B43]"
+                )}
+              >
+                {opt}
+              </button>
+            </li>
           ))}
-        </select>
-      </div>
+        </ul>
+      )}
     </div>
   );
 }

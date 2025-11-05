@@ -1,5 +1,5 @@
 // src/pages/Dashboard.tsx
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -14,6 +14,7 @@ import {
   Search,
   Loader2,
   TriangleAlert,
+  Home,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import clsx from "clsx";
@@ -24,12 +25,12 @@ type MedicalRow = {
   doctor: string;
   diagnosis: string;
   drug: string;
-  date: string; // ISO e.g. 2025-05-27
+  date: string; // ISO
   note: string;
 };
 
 type AiInsight = {
-  message: string; // ملخص بالعربية
+  message: string;
   meta?: Record<string, unknown>;
 };
 
@@ -43,6 +44,7 @@ const ENDPOINTS = {
 
 /* ============================== أدوات مساعدة ============================== */
 async function httpGet<T>(path: string, params?: Record<string, string>) {
+  // نضمن عنوانًا مطلقًا بتمرير origin
   const url = new URL(BASE_URL + path || path, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
@@ -65,13 +67,15 @@ async function httpPost<T>(path: string, body: unknown) {
   return (await res.json()) as T;
 }
 
-/* ---------- ألوان العلامة ---------- */
+/* ---------- ألوان الهوية ---------- */
 const brand = {
+  green: "#0E6B43",
+  greenHover: "#0f7d4d",
+  accent: "#97FC4A",
   secondary: "#0D16D1",
-  accentLight: "#97FC4A",
 };
 
-/* خيارات الفلاتر الثابتة */
+/* خيارات الفلاتر */
 const dates = ["الكل", "الأسبوع الأخير"];
 const patternTypes = [
   "الكل",
@@ -85,21 +89,21 @@ const patternTypes = [
 export default function Dashboard() {
   const navigate = useNavigate();
 
-  /* فلاتر */
+  // فلاتر
   const [selDate, setSelDate] = useState<string>("الكل");
   const [selDoctor, setSelDoctor] = useState<string>("الكل");
   const [selPattern, setSelPattern] = useState<string>("الكل");
   const [q, setQ] = useState<string>("");
 
-  /* بيانات قادمة من الخادم */
+  // بيانات
   const [rows, setRows] = useState<MedicalRow[]>([]);
   const [doctors, setDoctors] = useState<string[]>([]);
 
-  /* حالات */
+  // حالات
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
-  /* AI */
+  // AI
   const [aiLoading, setAiLoading] = useState<boolean>(false);
   const [ai, setAi] = useState<AiInsight | null>(null);
 
@@ -121,11 +125,9 @@ export default function Dashboard() {
         });
 
         if (cancel) return;
-        setRows(data.items || []);
-        const unique = Array.from(
-          new Set((data.items || []).map((r) => r.doctor))
-        );
-        setDoctors(unique);
+        const items = data.items || [];
+        setRows(items);
+        setDoctors(Array.from(new Set(items.map((r) => r.doctor))));
       } catch (e: any) {
         if (!cancel) setError(e?.message || "فشل تحميل البيانات");
       } finally {
@@ -139,7 +141,7 @@ export default function Dashboard() {
     };
   }, [selDate, selDoctor, selPattern, q]);
 
-  /* --------------------------- تصفية محلية (اختيارية) --------------------------- */
+  /* --------------------------- تصفية محلية --------------------------- */
   const filtered = useMemo(() => {
     if (!q.trim()) return rows;
     const s = q.trim();
@@ -153,7 +155,7 @@ export default function Dashboard() {
     );
   }, [rows, q]);
 
-  /* --------------------------- بيانات الشارت --------------------------- */
+  /* --------------------------- بيانات الرسم --------------------------- */
   const chartData = useMemo(() => {
     const by: Record<string, number> = {};
     doctors.forEach((d) => (by[d] = 0));
@@ -166,7 +168,7 @@ export default function Dashboard() {
     [chartData]
   );
 
-  /* --------------------------- تشغيل تحليل AI --------------------------- */
+  /* --------------------------- تشغيل AI --------------------------- */
   async function runAi() {
     try {
       setAiLoading(true);
@@ -184,7 +186,7 @@ export default function Dashboard() {
     } catch (e: any) {
       setAi({
         message:
-          "تعذّر تشغيل التحليل الآن. تأكد من مسار خدمة AI أو راجع السجلات.",
+          "تعذّر تشغيل التحليل الآن. تأكد من مسار خدمة AI واتصال الخادم.",
         meta: { error: e?.message },
       });
     } finally {
@@ -193,16 +195,18 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-[#EEF1F8]">
-      <div className="grid grid-cols-[300px_1fr]">
+    <div
+      className="min-h-screen"
+      style={{
+        background:
+          "linear-gradient(180deg, #F5F7FB 0%, #E9EDF5 100%), radial-gradient(800px 500px at 15% 8%, rgba(146,227,169,0.15), transparent 60%)",
+      }}
+    >
+      <div className="grid grid-cols-[280px_1fr]">
         {/* Sidebar */}
-        <aside
-          className="min-h-screen border-l bg-white sticky top-0"
-          dir="rtl"
-        >
+        <aside className="min-h-screen border-l bg-white sticky top-0">
           <div className="p-6 pb-4 flex items-center justify-between">
             <div className="text-2xl font-semibold">الشعار</div>
-            <UserRound className="size-6 text-black/70" />
           </div>
 
           <nav className="px-4 space-y-2">
@@ -233,7 +237,8 @@ export default function Dashboard() {
             <button
               onClick={() => {
                 localStorage.removeItem("haseef_auth");
-                navigate("/login");
+                sessionStorage.removeItem("haseef_auth");
+                navigate("/");
               }}
               className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg-black/5"
             >
@@ -244,15 +249,25 @@ export default function Dashboard() {
         </aside>
 
         {/* Main */}
-        <main className="p-6 md:p-8" dir="rtl">
+        <main className="p-6 md:p-8 relative" dir="rtl">
+          {/* زر الرجوع للهوم (أيقونة فقط) */}
+          <button
+            onClick={() => navigate("/home")}
+            className="absolute top-4 right-4 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition"
+            title="العودة للصفحة الرئيسية"
+          >
+            <Home className="size-5" style={{ color: brand.green }} />
+          </button>
+
           {/* Header */}
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex flex-wrap items-center justify-between gap-4 mt-2">
             <div className="flex items-center gap-3">
-              <div className="text-xl md:text-2xl font-semibold">
+              <div
+                className="text-xl md:text-2xl font-semibold"
+                style={{ color: brand.green }}
+              >
                 السجلات الطبية
               </div>
-              <UserRound className="size-6 text-black/80" />
-              <Bell className="size-5 text-black/70" />
             </div>
 
             {/* البحث */}
@@ -260,38 +275,37 @@ export default function Dashboard() {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50"
+                className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50 focus:ring-4 focus:ring-emerald-300/30"
                 placeholder="ابحث..."
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/50" />
             </div>
 
             {/* الفلاتر */}
-            <div className="flex items-end gap-1.5 sm:gap-2 md:gap-2.5">
-              <FilterSelect
-                label="التاريخ"
-                value={selDate}
-                onChange={setSelDate}
-                options={dates}
-                placeholder="النطاق الزمني"
-              />
-              <FilterSelect
-                label="الطبيب"
-                value={selDoctor}
-                onChange={setSelDoctor}
-                options={["الكل", ...doctors]}
-                placeholder="اختر طبيب"
-              />
-              <FilterSelect
+            <div className="flex items-end gap-2">
+              <Dropdown
                 label="نوع النمط"
                 value={selPattern}
                 onChange={setSelPattern}
                 options={patternTypes}
-                placeholder="اختر النمط"
+              />
+              <Dropdown
+                label="الطبيب"
+                value={selDoctor}
+                onChange={setSelDoctor}
+                options={["الكل", ...doctors]}
+              />
+
+              <Dropdown
+                label="التاريخ"
+                value={selDate}
+                onChange={setSelDate}
+                options={dates}
               />
             </div>
           </div>
 
+          {/* رسالة خطأ */}
           {error && (
             <div className="mt-4 flex items-center gap-2 text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-xl">
               <TriangleAlert className="size-4" />
@@ -299,13 +313,13 @@ export default function Dashboard() {
             </div>
           )}
 
-          {/* Stats */}
+          {/* إحصائيات */}
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4 md:max-w-[760px]">
             <StatPill
-              title="عدد التشخيصات"
-              value={filtered.length}
-              bg={brand.accentLight}
-              text="#173E1C"
+              title="عدد السجلات"
+              value={rows.length}
+              bg="#D9DBFF"
+              text={brand.secondary}
             />
             <StatPill
               title="عدد الأطباء"
@@ -313,23 +327,24 @@ export default function Dashboard() {
               bg="#CDEFE3"
               text="#1B4D3B"
             />
+
             <StatPill
-              title="عدد السجلات"
-              value={rows.length}
-              bg="#D9DBFF"
-              text={brand.secondary}
+              title="عدد التنبيهات"
+              value={"—"}
+              bg="#E0F6CF"
+              text="#173E1C"
             />
           </div>
 
-          {/* AI + Chart */}
+          {/* AI + الرسم */}
           <div className="mt-6 grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-5">
-            {/* ✅ بطاقة التحليل تغطي كامل الإطار */}
+            {/* بطاقة التحليل */}
             <div className="rounded-2xl shadow-ai overflow-hidden h-full">
               <div
                 className="h-full min-h-[260px] p-6 text-white flex flex-col justify-between"
                 style={{
                   background:
-                    "linear-gradient(135deg, #2C34D4 0%, #4C4DE9 38%, #0D16D1 100%)",
+                    "linear-gradient(135deg, #2B2D6B 0%, #4C4DE9 42%, #0D16D1 100%)",
                 }}
               >
                 <div className="flex items-center justify-between">
@@ -338,10 +353,10 @@ export default function Dashboard() {
                     <Bot className="size-5 text-white" />
                   </div>
                   <button
-                    onClick={runAi}
-                    disabled={aiLoading || loading || filtered.length === 0}
                     className="h-9 px-4 rounded-full bg-white text-[#0D16D1] text-sm font-semibold hover:bg-white/90 transition disabled:opacity-60 disabled:cursor-not-allowed"
                     type="button"
+                    onClick={runAi}
+                    disabled={aiLoading || loading}
                   >
                     {aiLoading ? (
                       <span className="inline-flex items-center gap-2">
@@ -365,7 +380,7 @@ export default function Dashboard() {
               </div>
             </div>
 
-            {/* Chart */}
+            {/* الرسم البسيط */}
             <Card className="shadow-soft">
               <CardHeader className="pb-0">
                 <CardTitle className="text-base">نسبة التكرار</CardTitle>
@@ -413,7 +428,7 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          {/* Table */}
+          {/* الجدول */}
           <Card className="mt-6 shadow-soft">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -490,8 +505,9 @@ export default function Dashboard() {
   );
 }
 
-/* ---------- عناصر فرعية ---------- */
+/* ============================== مكوّنات فرعية ============================== */
 
+// عنصر القائمة الجانبية (نسخة واحدة فقط)
 function SideItem({
   icon,
   label,
@@ -510,7 +526,7 @@ function SideItem({
         "w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3 transition-colors",
         active ? "text-[#0D16D1] border border-black/10" : "hover:bg-black/5"
       )}
-      style={active ? { backgroundColor: "#97FC4A" } : {}}
+      style={active ? { backgroundColor: brand.accent } : {}}
     >
       <span className="font-medium">{label}</span>
       <span className="opacity-80">{icon}</span>
@@ -518,57 +534,74 @@ function SideItem({
   );
 }
 
-function FilterSelect({
+// Dropdown مخصص
+function Dropdown({
   label,
   value,
   onChange,
   options,
-  placeholder,
-  id,
-  minWidth = "min-w-[8rem]",
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: string[];
-  placeholder: string;
-  id?: string;
-  minWidth?: string;
 }) {
-  const selectId = id ?? `select-${label}`;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
   return (
-    <div className={clsx("flex flex-col gap-1", minWidth)}>
-      <label htmlFor={selectId} className="text-xs text-black/60 pr-1">
-        {label}
-      </label>
-      <div className="relative inline-block">
-        <select
-          id={selectId}
-          dir="rtl"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="
-            select-green
-            pr-9
-            rounded-2xl
-            border border-black/10
-            shadow-md
-            h-10
-            text-sm
-            focus:outline-none
-            focus:ring-4
-            focus:ring-emerald-300/30
-          "
-          style={{ WebkitAppearance: "none", MozAppearance: "none" }}
+    <div className="relative min-w-[8rem]" ref={ref}>
+      <label className="text-xs text-black/60 pr-1 block mb-1">{label}</label>
+      <button
+        type="button"
+        onClick={() => setOpen((s) => !s)}
+        className="h-10 w-full rounded-full bg-[#0E6B43] text-white font-semibold px-4 flex items-center justify-between text-sm shadow-md hover:bg-[#0f7d4d] transition"
+      >
+        <span className="truncate">{value}</span>
+        <svg
+          className={clsx("size-4 transition-transform", open && "rotate-180")}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
         >
-          <option hidden>{placeholder}</option>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
+
+      {open && (
+        <ul className="absolute mt-2 w-full bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden z-50">
           {options.map((opt) => (
-            <option key={opt} value={opt} className="bg-white text-black">
-              {opt}
-            </option>
+            <li key={opt}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(opt);
+                  setOpen(false);
+                }}
+                className={clsx(
+                  "w-full text-right px-4 py-2 text-sm hover:bg-emerald-50",
+                  value === opt && "bg-emerald-50 font-semibold text-[#0E6B43]"
+                )}
+              >
+                {opt}
+              </button>
+            </li>
           ))}
-        </select>
-      </div>
+        </ul>
+      )}
     </div>
   );
 }

@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
-  UserRound,
   Plus,
   Shield,
   Pill,
@@ -18,8 +17,18 @@ import {
   Sparkles,
   Loader2,
   TriangleAlert,
+  Home,
+  UserRound,
 } from "lucide-react";
 import clsx from "clsx";
+
+/* ============================== الهوية البصرية (مطابقة للداشبورد) ============================== */
+const brand = {
+  green: "#0E6B43",
+  greenHover: "#0f7d4d",
+  accent: "#97FC4A",
+  secondary: "#0D16D1",
+};
 
 /* ============================== Types ============================== */
 type Msg = {
@@ -44,17 +53,10 @@ const starterSuggestions = [
   "اقترح تنبيهات ذكية للأطباء",
 ];
 
-/* ============================== API config ============================== */
+/* ============================== API config (مطابق للداشبورد) ============================== */
 // ضعي قيمة الدومين في .env:  VITE_API_BASE_URL=https://api.example.com
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-const ENDPOINTS = {
-  chat: "/api/assistant/chat", // استجابة كاملة
-  stream: "/api/assistant/stream", // استجابة متدفقة (اختياري)
-  upload: "/api/files/upload", // اختياري للمرفقات
-};
-
-/* Helpers */
 async function httpPost<T>(path: string, body: unknown) {
   const res = await fetch(BASE_URL + path || path, {
     method: "POST",
@@ -90,6 +92,12 @@ async function streamPost(
   }
 }
 
+const ENDPOINTS = {
+  chat: "/api/assistant/chat", // استجابة كاملة
+  stream: "/api/assistant/stream", // استجابة متدفقة (اختياري)
+  upload: "/api/files/upload", // اختياري للمرفقات
+};
+
 /* ============================== Component ============================== */
 export default function Chat() {
   const navigate = useNavigate();
@@ -110,7 +118,6 @@ export default function Chat() {
   const [useStreaming, setUseStreaming] = useState(true); // يمكنكِ إطفاءه إذا كان الـbackend لا يدعم البثّ
 
   const fileRef = useRef<HTMLInputElement>(null);
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -164,8 +171,6 @@ export default function Chat() {
           { messages: [...messages, userMsg] },
           (chunk) => {
             buffer += chunk;
-            // اختياري: لو السيرفر يرسل JSONL أو "data: ..." عالهيئة SSE، عالجيه هنا.
-            // هنا نفترض نص خام يضاف مباشرة.
             setMessages((m) =>
               m.map((msg) =>
                 msg.id === draftId ? { ...msg, content: buffer } : msg
@@ -173,8 +178,6 @@ export default function Chat() {
             );
           }
         );
-
-        // بعد اكتمال البث، يمكنكِ إضافة sourceTag لو أرسله السيرفر في آخر chunk (لو JSONL).
       } else {
         // 2) استجابة كاملة
         const res = await httpPost<{ content: string; sourceTag?: string }>(
@@ -216,11 +219,7 @@ export default function Chat() {
   /* --------------- Attachments (hook فقط) --------------- */
   const handleAttach = async (file: File) => {
     try {
-      // ارفعي الملف للخادم ثم أضيفي رسالة system/user تحتوي رابط/معرّف الملف
-      // مثال رفع:
-      // const form = new FormData(); form.append("file", file);
-      // const res = await fetch((BASE_URL + ENDPOINTS.upload)||ENDPOINTS.upload,{method:"POST",body:form,credentials:"include"});
-      // const { fileId, url } = await res.json();
+      // هنا يضاف رفع الملف إن رغبتِ
       setMessages((m) => [
         ...m,
         {
@@ -237,16 +236,21 @@ export default function Chat() {
   };
 
   return (
-    <div className="min-h-screen bg-[#EEF1F8]">
-      <div className="grid grid-cols-[300px_1fr]">
-        {/* Sidebar */}
+    <div
+      className="min-h-screen"
+      style={{
+        background:
+          "linear-gradient(180deg, #F5F7FB 0%, #E9EDF5 100%), radial-gradient(800px 500px at 15% 8%, rgba(146,227,169,0.15), transparent 60%)",
+      }}
+    >
+      <div className="grid grid-cols-[280px_1fr]">
+        {/* Sidebar — مطابق للداشبورد */}
         <aside
           className="min-h-screen border-l bg-white sticky top-0"
           dir="rtl"
         >
           <div className="p-6 pb-4 flex items-center justify-between">
             <div className="text-2xl font-semibold">الشعار</div>
-            <UserRound className="size-6 text-black/70" />
           </div>
 
           <nav className="px-4 space-y-2">
@@ -281,7 +285,8 @@ export default function Chat() {
             <button
               onClick={() => {
                 localStorage.removeItem("haseef_auth");
-                navigate("/login");
+                sessionStorage.removeItem("haseef_auth");
+                navigate("/");
               }}
               className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg-black/5"
             >
@@ -292,19 +297,28 @@ export default function Chat() {
         </aside>
 
         {/* Main */}
-        <main className="p-6 md:p-8" dir="rtl">
+        <main className="p-6 md:p-8 relative" dir="rtl">
+          {/* زر الرجوع للهوم — نفس النمط */}
+          <button
+            onClick={() => navigate("/home")}
+            className="absolute top-4 right-4 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition"
+            title="العودة للصفحة الرئيسية"
+          >
+            <Home className="size-5" style={{ color: brand.green }} />
+          </button>
+
           {/* Header */}
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-4 mt-3">
             <div className="flex items-center gap-3">
-              <h1 className="text-xl md:text-2xl font-semibold">
+              <h1
+                className="text-xl md:text-2xl font-semibold"
+                style={{ color: brand.green }}
+              >
                 {headerTitle}
               </h1>
               <Sparkles className="size-5 text-[#4C4DE9]" />
             </div>
-            <div className="flex items-center gap-3">
-              <Bell className="size-5 text-black/70" />
-              <UserRound className="size-6 text-black/80" />
-            </div>
+            <div className="flex items-center gap-3"></div>
           </div>
 
           {/* Status */}
@@ -326,6 +340,7 @@ export default function Chat() {
                 {s}
               </button>
             ))}
+
             {/* زر تبديل البثّ */}
             <button
               onClick={() => setUseStreaming((v) => !v)}
@@ -439,7 +454,7 @@ export default function Chat() {
   );
 }
 
-/* ============================== Sub components ============================== */
+/* ============================== Sub components (مطابقة للنمط) ============================== */
 function SideItem({
   icon,
   label,
@@ -458,7 +473,7 @@ function SideItem({
         "w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3 transition-colors",
         active ? "text-[#0D16D1] border border-black/10" : "hover:bg-black/5"
       )}
-      style={active ? { backgroundColor: "#97FC4A" } : {}}
+      style={active ? { backgroundColor: brand.accent } : {}}
     >
       <span className="font-medium">{label}</span>
       <span className="opacity-80">{icon}</span>

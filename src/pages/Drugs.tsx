@@ -1,5 +1,5 @@
 // src/pages/Drugs.tsx
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -14,6 +14,7 @@ import {
   Search,
   Loader2,
   TriangleAlert,
+  Home,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import clsx from "clsx";
@@ -24,30 +25,22 @@ type RxRow = {
   doctor: string;
   diagnosis: string;
   drug: string;
-  date: string; // ISO أو DD-MM-YYYY
+  date: string;
   note: string;
 };
 
 type DonutSlice = {
-  label: string; // اسم الدواء
-  value: number; // نسبة مئوية (يشترط مجموع ~ 100)
-  color?: string; // اختياري: إن لم يُرسل سنولّد ألوان افتراضية
+  label: string;
+  value: number; // 0..100 (المجموع ~100)
+  color?: string;
 };
 
-type ListResponse = {
-  items: RxRow[];
-  doctors?: string[];
-  drugs?: string[];
-};
-
-type DonutResponse = {
-  distribution: DonutSlice[]; // e.g. [{label:"Amoxicillin",value:65}, ...]
-};
-
+type ListResponse = { items: RxRow[]; doctors?: string[]; drugs?: string[] };
+type DonutResponse = { distribution: DonutSlice[] };
 type AiInsight = { message: string; sourceTag?: string };
 
 /* ============================== API config ============================== */
-// ضعي الدومين في .env إذا كان خارجيًا:  VITE_API_BASE_URL=https://api.example.com
+// ضعي الدومين في .env لو كان خارجيًا: VITE_API_BASE_URL=https://api.example.com
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const ENDPOINTS = {
@@ -67,7 +60,6 @@ async function httpGet<T>(path: string, params?: Record<string, string>) {
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as T;
 }
-
 async function httpPost<T>(path: string, body: unknown) {
   const res = await fetch(BASE_URL + path || path, {
     method: "POST",
@@ -78,6 +70,14 @@ async function httpPost<T>(path: string, body: unknown) {
   if (!res.ok) throw new Error(await res.text());
   return (await res.json()) as T;
 }
+
+/* ============================== Brand ============================== */
+const brand = {
+  green: "#0E6B43",
+  greenHover: "#0f7d4d",
+  accent: "#97FC4A",
+  secondary: "#0D16D1",
+};
 
 /* ============================== Page ============================== */
 export default function Drugs() {
@@ -105,14 +105,14 @@ export default function Drugs() {
   const [selDrug, setSelDrug] = useState<string>("الكل");
   const [q, setQ] = useState("");
 
-  // تحميل السجلات + القوائم بحسب الفلاتر
+  /* ---------- تحميل السجلات ---------- */
   useEffect(() => {
     let cancel = false;
-    async function load() {
+    (async () => {
       try {
         setError(null);
         setLoading(true);
-        setAiMsg(null); // توحيد سلوك الرسائل مثل صفحة التأمين
+        setAiMsg(null); // اتساق مع بقية الصفحات
         const data = await httpGet<ListResponse>(ENDPOINTS.list, {
           dateRange: selDate === "الأسبوع الأخير" ? "last_week" : "all",
           doctor: selDoctor,
@@ -120,37 +120,33 @@ export default function Drugs() {
           q: q.trim(),
         });
         if (cancel) return;
-        setRows(data.items ?? []);
+        const items = data.items ?? [];
+        setRows(items);
         setDoctors(
           data.doctors?.length
             ? data.doctors
-            : Array.from(
-                new Set((data.items ?? []).map((r) => r.doctor))
-              ).filter(Boolean)
+            : Array.from(new Set(items.map((r) => r.doctor))).filter(Boolean)
         );
         setDrugs(
           data.drugs?.length
             ? data.drugs
-            : Array.from(new Set((data.items ?? []).map((r) => r.drug))).filter(
-                Boolean
-              )
+            : Array.from(new Set(items.map((r) => r.drug))).filter(Boolean)
         );
       } catch (e: any) {
         if (!cancel) setError(e?.message || "فشل تحميل سجلات الصرف.");
       } finally {
         if (!cancel) setLoading(false);
       }
-    }
-    load();
+    })();
     return () => {
       cancel = true;
     };
   }, [selDate, selDoctor, selDrug, q]);
 
-  // تحميل توزيع الدونات من السيرفر (متأثر بنفس الفلاتر)
+  /* ---------- تحميل توزيع الدونات ---------- */
   useEffect(() => {
     let cancel = false;
-    async function loadDonut() {
+    (async () => {
       try {
         setLoadingDonut(true);
         const d = await httpGet<DonutResponse>(ENDPOINTS.donut, {
@@ -160,7 +156,6 @@ export default function Drugs() {
           q: q.trim(),
         });
         if (cancel) return;
-        // توليد ألوان افتراضية عند الحاجة — تتناسب مع لوحة الألوان في صفحة التأمين
         const palette = [
           "#3853FF",
           "#6FE38A",
@@ -176,18 +171,17 @@ export default function Drugs() {
           })) ?? [];
         setDonut(cleaned);
       } catch {
-        // نكتفي بصمت هنا مثل صفحة التأمين
+        // يكفي تجاهل الخطأ في المخطط
       } finally {
-        setLoadingDonut(false);
+        if (!cancel) setLoadingDonut(false);
       }
-    }
-    loadDonut();
+    })();
     return () => {
       cancel = true;
     };
   }, [selDate, selDoctor, selDrug, q]);
 
-  // تصفية محلية للبحث (احتياط لو الـAPI لم يطبّق q)
+  /* ---------- تصفية محلية ---------- */
   const filtered = useMemo(() => {
     if (!q.trim()) return rows;
     const s = q.trim();
@@ -196,17 +190,18 @@ export default function Drugs() {
         r.doctor?.includes(s) ||
         r.diagnosis?.includes(s) ||
         r.drug?.includes(s) ||
-        r.note?.includes(s)
+        r.note?.includes(s) ||
+        r.date?.includes(s)
     );
   }, [rows, q]);
 
-  // أعلى دواء صرفًا
+  /* ---------- أعلى دواء ---------- */
   const topDrug = useMemo(() => {
     if (!donut?.length) return "—";
     return donut.reduce((a, b) => (a.value >= b.value ? a : b)).label;
   }, [donut]);
 
-  // بناء conic-gradient من بيانات الدونات
+  /* ---------- conic-gradient ---------- */
   const donutBg = useMemo(() => {
     if (!donut?.length) return "conic-gradient(#E6ECFF 0deg 360deg)";
     let start = 0;
@@ -242,16 +237,21 @@ export default function Drugs() {
   }
 
   return (
-    <div className="min-h-screen bg-[#EEF1F8]">
-      <div className="grid grid-cols-[300px_1fr]">
-        {/* Sidebar — مطابق للتأمين */}
+    <div
+      className="min-h-screen"
+      style={{
+        background:
+          "linear-gradient(180deg, #F5F7FB 0%, #E9EDF5 100%), radial-gradient(800px 500px at 15% 8%, rgba(146,227,169,0.15), transparent 60%)",
+      }}
+    >
+      <div className="grid grid-cols-[280px_1fr]">
+        {/* Sidebar */}
         <aside
           className="min-h-screen border-l bg-white sticky top-0"
           dir="rtl"
         >
           <div className="p-6 pb-4 flex items-center justify-between">
             <div className="text-2xl font-semibold">الشعار</div>
-            <UserRound className="size-6 text-black/70" />
           </div>
 
           <nav className="px-4 space-y-2">
@@ -265,12 +265,7 @@ export default function Drugs() {
               label="التأمين"
               onClick={() => navigate("/insurance")}
             />
-            <SideItem
-              active
-              icon={<Pill className="size-4" />}
-              label="دواء"
-              onClick={() => {}}
-            />
+            <SideItem active icon={<Pill className="size-4" />} label="دواء" />
             <SideItem
               icon={<BellRing className="size-4" />}
               label="إشعارات"
@@ -287,6 +282,7 @@ export default function Drugs() {
             <button
               onClick={() => {
                 localStorage.removeItem("haseef_auth");
+                sessionStorage.removeItem("haseef_auth");
                 navigate("/login");
               }}
               className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg-black/5"
@@ -297,22 +293,32 @@ export default function Drugs() {
           </div>
         </aside>
 
-        {/* Main — مطابق للتأمين */}
-        <main className="p-6 md:p-8" dir="rtl">
+        {/* Main */}
+        <main className="p-6 md:p-8 relative" dir="rtl">
+          {/* زر العودة للهوم (منزل فقط) */}
+          <button
+            onClick={() => navigate("/home")}
+            className="absolute top-4 right-4 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition"
+            title="العودة للصفحة الرئيسية"
+          >
+            <Home className="size-5" style={{ color: brand.green }} />
+          </button>
+
           {/* Header */}
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-4 mt-2">
             <div className="flex items-center gap-3">
-              <div className="text-xl md:text-2xl font-semibold">
+              <div
+                className="text-xl md:text-2xl font-semibold"
+                style={{ color: brand.green }}
+              >
                 صرف الأدوية
               </div>
-              <UserRound className="size-6 text-black/80" />
-              <Bell className="size-5 text-black/70" />
             </div>
 
             {/* Search */}
             <div className="relative w-[320px] max-w-[45vw]">
               <input
-                className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50"
+                className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50 focus:ring-4 focus:ring-emerald-300/30"
                 placeholder="ابحث..."
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
@@ -320,31 +326,26 @@ export default function Drugs() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/50" />
             </div>
 
-            {/* Filters — نفس المكوّن ونفس المقاسات */}
-            <div className="flex items-end gap-1.5 sm:gap-2 md:gap-2.5">
-              <FilterSelect
-                label="التاريخ"
-                value={selDate}
-                onChange={setSelDate}
-                options={["الكل", "الأسبوع الأخير"]}
-                placeholder="النطاق الزمني"
-                minWidth="min-w-[8rem]"
-              />
-              <FilterSelect
-                label="الطبيب"
-                value={selDoctor}
-                onChange={setSelDoctor}
-                options={["الكل", ...doctors]}
-                placeholder="اختر طبيب"
-                minWidth="min-w-[8rem]"
-              />
-              <FilterSelect
+            {/* Filters (Dropdown مخصّص) */}
+            <div className="flex items-end gap-2">
+              <Dropdown
                 label="الدواء"
                 value={selDrug}
                 onChange={setSelDrug}
                 options={["الكل", ...drugs]}
-                placeholder="اختر الدواء"
-                minWidth="min-w-[8rem]"
+              />
+              <Dropdown
+                label="الطبيب"
+                value={selDoctor}
+                onChange={setSelDoctor}
+                options={["الكل", ...doctors]}
+              />
+
+              <Dropdown
+                label="التاريخ"
+                value={selDate}
+                onChange={setSelDate}
+                options={["الكل", "الأسبوع الأخير"]}
               />
             </div>
           </div>
@@ -357,16 +358,16 @@ export default function Drugs() {
             </div>
           )}
 
-          {/* Stats — نفس الأحجام والألوان */}
+          {/* Stats */}
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4 md:max-w-[760px]">
             <StatPill
               title="عدد العمليات"
               value={filtered.length}
               bg="#D9DBFF"
-              text="#0D16D1"
+              text={brand.secondary}
             />
             <StatPill
-              title="الأدوية الأعلى صرفًا"
+              title="الدواء الأعلى صرفًا"
               value={topDrug}
               bg="#CDEFE3"
               text="#1B4D3B"
@@ -379,15 +380,15 @@ export default function Drugs() {
             />
           </div>
 
-          {/* AI + Donut (مطابق لتخطيط التأمين) */}
+          {/* AI + Donut */}
           <div className="mt-6 grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-5">
-            {/* بطاقة الذكاء الاصطناعي — نفس التدرج والأزرار */}
+            {/* AI */}
             <div className="rounded-2xl shadow-ai overflow-hidden">
               <div
                 className="min-h-[260px] h-full p-6 text-white flex flex-col justify-between"
                 style={{
                   background:
-                    "linear-gradient(135deg, #2C34D4 0%, #4C4DE9 38%, #0D16D1 100%)",
+                    "linear-gradient(135deg, #2B2D6B 0%, #4C4DE9 42%, #0D16D1 100%)",
                 }}
               >
                 <div className="flex items-center justify-between">
@@ -395,7 +396,6 @@ export default function Drugs() {
                     <span className="font-semibold">تحليل</span>
                     <Bot className="size-5 text-white" />
                   </div>
-
                   <button
                     className="h-9 px-4 rounded-full bg-white text-[#0D16D1] text-sm font-semibold hover:bg-white/90 transition disabled:opacity-60 disabled:cursor-not-allowed"
                     type="button"
@@ -432,7 +432,7 @@ export default function Drugs() {
               </div>
             </div>
 
-            {/* Donut — نفس بطاقة الشارت من حيث الهوامش والحدود والظلال */}
+            {/* Donut */}
             <Card className="shadow-soft">
               <CardHeader className="pb-0">
                 <CardTitle className="text-base">نسبة الصرف</CardTitle>
@@ -480,7 +480,7 @@ export default function Drugs() {
             </Card>
           </div>
 
-          {/* Table — نفس المقاسات والخطوط والحدود */}
+          {/* Table */}
           <Card className="mt-6 shadow-soft">
             <CardContent className="p-0">
               <div className="overflow-x-auto">
@@ -544,7 +544,7 @@ export default function Drugs() {
   );
 }
 
-/* ============================== Subcomponents (مطابقة لصفحة التأمين) ============================== */
+/* ============================== Subcomponents ============================== */
 function SideItem({
   icon,
   label,
@@ -563,7 +563,7 @@ function SideItem({
         "w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3 transition-colors",
         active ? "text-[#0D16D1] border border-black/10" : "hover:bg-black/5"
       )}
-      style={active ? { backgroundColor: "#97FC4A" } : {}}
+      style={active ? { backgroundColor: brand.accent } : {}}
     >
       <span className="font-medium">{label}</span>
       <span className="opacity-80">{icon}</span>
@@ -571,59 +571,74 @@ function SideItem({
   );
 }
 
-function FilterSelect({
+/** Dropdown مخصص (بديل select) */
+function Dropdown({
   label,
   value,
   onChange,
   options,
-  placeholder,
-  id,
-  minWidth = "min-w-[8rem]",
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: string[];
-  placeholder: string;
-  id?: string;
-  minWidth?: string;
 }) {
-  const selectId = id ?? `select-${label}`;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
   return (
-    <div className={clsx("flex flex-col gap-1", minWidth)}>
-      <label htmlFor={selectId} className="text-xs text-black/60 pr-1">
-        {label}
-      </label>
-      <div className="relative inline-block">
-        <select
-          id={selectId}
-          dir="rtl"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="
-            select-green
-            pr-9
-            rounded-2xl
-            border border-black/10
-            shadow-md
-            h-10
-            text-sm
-            bg-white
-            text-black
-            focus:outline-none
-            focus:ring-4
-            focus:ring-emerald-300/30
-          "
-          style={{ WebkitAppearance: "none", MozAppearance: "none" }}
+    <div className="relative min-w-[8rem]" ref={ref}>
+      <label className="text-xs text-black/60 pr-1 block mb-1">{label}</label>
+      <button
+        type="button"
+        onClick={() => setOpen((s) => !s)}
+        className="h-10 w-full rounded-full bg-[#0E6B43] text-white font-semibold px-4 flex items-center justify-between text-sm shadow-md hover:bg-[#0f7d4d] transition"
+      >
+        <span className="truncate">{value}</span>
+        <svg
+          className={clsx("size-4 transition-transform", open && "rotate-180")}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
         >
-          <option hidden>{placeholder}</option>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
+
+      {open && (
+        <ul className="absolute mt-2 w-full bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden z-50">
           {options.map((opt) => (
-            <option key={opt} value={opt} className="bg-white text-black">
-              {opt}
-            </option>
+            <li key={opt}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(opt);
+                  setOpen(false);
+                }}
+                className={clsx(
+                  "w-full text-right px-4 py-2 text-sm hover:bg-emerald-50",
+                  value === opt && "bg-emerald-50 font-semibold text-[#0E6B43]"
+                )}
+              >
+                {opt}
+              </button>
+            </li>
           ))}
-        </select>
-      </div>
+        </ul>
+      )}
     </div>
   );
 }
@@ -649,7 +664,6 @@ function StatPill({
     </div>
   );
 }
-
 function Th({ children, w }: { children: React.ReactNode; w?: string }) {
   return (
     <th
@@ -660,7 +674,6 @@ function Th({ children, w }: { children: React.ReactNode; w?: string }) {
     </th>
   );
 }
-
 function Td({
   children,
   w,

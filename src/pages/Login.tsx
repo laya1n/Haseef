@@ -1,24 +1,63 @@
 // src/pages/Login.tsx
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Eye, EyeOff, UserRound, Lock, LogIn, Mail } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  UserRound,
+  Lock,
+  ArrowLeft,
+  CheckCircle2,
+} from "lucide-react";
 
-type StoredUser = { nationalId: string; password: string; name?: string };
+/* ============================== Types ============================== */
+type StoredUser = {
+  nationalId: string;
+  password: string;
+  name?: string;
+  email?: string;
+  phone?: string;
+};
 
+/* ============================== Utils ============================== */
+// يحوّل ٠١٢٣٤٥٦٧٨٩ و ۰۱۲۳۴۵۶۷۸۹ إلى 0123456789
+const normalizeDigits = (s: string) =>
+  s
+    .replace(/[٠-٩]/g, (d) => "0123456789"["٠١٢٣٤٥٦٧٨٩".indexOf(d)])
+    .replace(/[۰-۹]/g, (d) => "0123456789"["۰۱۲۳۴۵۶۷۸۹".indexOf(d)]);
+
+const isValidSaudiNID = (v: string) => /^\d{10}$/.test(v);
+
+const REDIRECT_PATH = "/home";
+
+/* ============================== Component ============================== */
 export default function Login() {
   const navigate = useNavigate();
+
   const [nationalId, setNationalId] = useState("");
   const [password, setPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
+  const [remember, setRemember] = useState(true);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
+  const [ok, setOk] = useState("");
+
+  const canSubmit = useMemo(
+    () => isValidSaudiNID(nationalId) && password.trim().length > 0 && !loading,
+    [nationalId, password, loading]
+  );
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErr("");
+    setOk("");
 
-    if (!nationalId.trim() || !password.trim()) {
-      setErr("الرجاء إدخال رقم الهوية وكلمة المرور.");
+    if (!isValidSaudiNID(nationalId)) {
+      setErr("رقم الهوية يجب أن يتكون من 10 أرقام.");
+      return;
+    }
+    if (!password.trim()) {
+      setErr("الرجاء إدخال كلمة المرور.");
       return;
     }
 
@@ -35,11 +74,16 @@ export default function Login() {
     }
 
     setLoading(true);
-    localStorage.setItem(
-      "haseef_auth",
-      JSON.stringify({ nationalId: user.nationalId, at: Date.now() })
-    );
-    navigate("/home");
+    const token = { nationalId: user.nationalId, at: Date.now() };
+
+    if (remember) localStorage.setItem("haseef_auth", JSON.stringify(token));
+    else sessionStorage.setItem("haseef_auth", JSON.stringify(token));
+
+    setTimeout(() => {
+      setLoading(false);
+      setOk("تم تسجيل الدخول بنجاح.");
+      navigate(REDIRECT_PATH);
+    }, 350);
   };
 
   return (
@@ -47,54 +91,95 @@ export default function Login() {
       className="min-h-screen flex items-center justify-center px-4"
       dir="rtl"
       style={{
-        background:
-          "linear-gradient(135deg, #0D16D1 0%, #4C4DE9 35%, #47A241 85%, #97FC4A 100%)",
+        background: `
+          radial-gradient(circle at 20% 20%, rgba(146, 227, 169, 0.10), transparent 60%),
+          linear-gradient(135deg, #251E56 0%, #2B2D6B 30%, #184C4B 70%, #1F5E53 100%)
+        `,
       }}
     >
       <div className="bg-white/95 backdrop-blur-md rounded-3xl shadow-2xl w-full max-w-md p-8 text-center">
-        {/* شعار أو عنوان */}
-        <div className="mb-6">
-          <div className="text-2xl font-bold text-[#0D16D1]">مرحباً بعودتك</div>
+        {/* Header */}
+        <header className="mb-6">
+          <h1 className="text-2xl font-bold text-[#112F2A]">مرحباً بعودتك</h1>
           <p className="text-sm text-black/60 mt-1">
             يسعدنا رؤيتك مجدداً! الرجاء تسجيل الدخول للمتابعة.
           </p>
-        </div>
+        </header>
 
-        {/* النموذج */}
-        <form onSubmit={handleSubmit} className="space-y-5 text-right">
+        {/* Form */}
+        <form
+          onSubmit={handleSubmit}
+          className="space-y-5 text-right"
+          noValidate
+        >
           {/* رقم الهوية */}
           <div>
-            <label className="text-sm font-medium text-black/70">
+            <label
+              htmlFor="national-id"
+              className="text-sm font-medium text-black/70"
+            >
               رقم الهوية
             </label>
             <div className="relative mt-1">
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-black/50">
-                <UserRound className="size-5" />
-              </span>
               <input
+                id="national-id"
+                name="national-id"
                 value={nationalId}
-                onChange={(e) => setNationalId(e.target.value)}
+                onChange={(e) => {
+                  const ascii = normalizeDigits(e.target.value);
+                  const only = ascii.replace(/[^0-9]/g, "");
+                  setNationalId(only);
+                }}
+                type="text"
                 inputMode="numeric"
-                placeholder="مثال: 1234567890"
-                className="w-full h-12 pr-10 pl-4 rounded-xl border border-black/10 bg-white text-[15px] focus:outline-none focus:ring-4 focus:ring-[#4C4DE9]/20"
+                pattern="[0-9٠-٩۰-۹]*"
+                autoComplete="username"
+                placeholder="       10 أرقام"
+                className="w-full h-12 pr-12 pl-4 rounded-xl border border-black/10 bg-white text-[15px]
+                           focus:outline-none focus:ring-4 focus:ring-[#92E3A9]/30 transition-all"
               />
+              {!nationalId && (
+                <span
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#92E3A9]"
+                  aria-hidden="true"
+                >
+                  <UserRound className="size-5" />
+                </span>
+              )}
             </div>
+            {!isValidSaudiNID(nationalId) && nationalId.length > 0 && (
+              <p className="mt-1 text-xs text-red-600">يجب أن يكون 10 أرقام.</p>
+            )}
           </div>
 
           {/* كلمة المرور */}
           <div>
-            <label className="text-sm font-medium text-black/70">
+            <label
+              htmlFor="password"
+              className="text-sm font-medium text-black/70"
+            >
               كلمة المرور
             </label>
             <div className="relative mt-1">
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-black/50"></span>
               <input
+                id="password"
+                name="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 type={showPass ? "text" : "password"}
-                placeholder="••••••••"
-                className="w-full h-12 pr-10 pl-10 rounded-xl border border-black/10 bg-white text-[15px] focus:outline-none focus:ring-4 focus:ring-[#4C4DE9]/20"
+                placeholder="       ••••••••"
+                autoComplete="current-password"
+                className="w-full h-12 pr-12 pl-12 rounded-xl border border-black/10 bg-white text-[15px]
+                           focus:outline-none focus:ring-4 focus:ring-[#92E3A9]/30 transition-all"
               />
+              {!password && (
+                <span
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-[#92E3A9]"
+                  aria-hidden="true"
+                >
+                  <Lock className="size-5" />
+                </span>
+              )}
               <button
                 type="button"
                 onClick={() => setShowPass((s) => !s)}
@@ -110,30 +195,47 @@ export default function Login() {
                 )}
               </button>
             </div>
+
+            <div className="mt-2 flex items-center justify-start text-sm">
+              <label className="inline-flex items-center gap-2 text-black/70 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="rounded border-black/20"
+                  checked={remember}
+                  onChange={(e) => setRemember(e.target.checked)}
+                />
+                تذكرني
+              </label>
+            </div>
           </div>
 
-          {/* خطأ */}
+          {/* Alerts */}
           {err && (
             <div className="text-sm text-red-600 bg-red-50 border border-red-100 rounded-xl px-3 py-2">
               {err}
             </div>
           )}
+          {ok && (
+            <div className="text-sm text-[#1F5E53] bg-[#92E3A9]/15 border border-[#92E3A9]/30 rounded-xl px-3 py-2 flex items-center gap-2">
+              <CheckCircle2 className="size-4" /> {ok}
+            </div>
+          )}
 
-          {/* تسجيل الدخول */}
+          {/* زر الدخول */}
           <button
             type="submit"
-            disabled={loading}
-            className="w-full h-12 rounded-xl bg-[#0D16D1] text-white font-semibold hover:bg-[#4C4DE9] transition disabled:opacity-60 disabled:cursor-not-allowed"
+            disabled={!canSubmit}
+            className="w-full h-12 rounded-xl bg-[#92E3A9] text-[#112F2A] font-semibold transition
+                       hover:bg-[#7ED8A0] disabled:opacity-60 disabled:cursor-not-allowed
+                       flex items-center justify-center gap-2"
           >
-            {loading ? "جاري الدخول..." : "تسجيل الدخول"}
-          </button>
-
-          {/* تسجيل الدخول بجوجل */}
-          <button
-            type="button"
-            className="w-full h-12 mt-2 rounded-xl border border-black/10 bg-white flex items-center justify-center gap-2 text-sm text-black/70 hover:bg-black/5 transition"
-          >
-            الدخول بواسطة نفاذ
+            {loading ? (
+              "جاري الدخول..."
+            ) : (
+              <>
+                تسجيل الدخول <ArrowLeft className="size-5" />
+              </>
+            )}
           </button>
         </form>
 
@@ -142,7 +244,7 @@ export default function Login() {
           لا تملك حساباً؟{" "}
           <Link
             to="/register"
-            className="text-[#0D16D1] hover:underline font-medium"
+            className="text-[#1F5E53] hover:underline font-medium"
           >
             إنشاء حساب
           </Link>

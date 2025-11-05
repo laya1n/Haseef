@@ -21,15 +21,28 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* =============================== */
+/* ✅ إصلاح "العينين" في حقول الباسوورد */
+/* =============================== */
+input[type="password"]::-ms-reveal,
+input[type="password"]::-ms-clear {
+  display: none;
+  width: 0;
+  height: 0;
+}
+input[type="password"] {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: none; /* يمنع أي أيقونات افتراضية */
+}
+
 /* 🔹 تخصيص أزرار موحدة */
 button {
   @apply px-4 py-2 rounded-lg transition-all duration-200 font-medium;
 }
-
 button.primary {
   @apply bg-green-600 text-white hover:bg-green-700;
 }
-
 button.secondary {
   @apply bg-primary text-white hover:bg-secondary;
 }
@@ -39,7 +52,16 @@ input[type="text"],
 input[type="password"],
 input[type="email"],
 input[type="number"] {
-  @apply w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary;
+  @apply w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none;
+  /* تركيز باللون الأخضر المتناسق */
+  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+}
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="email"]:focus,
+input[type="number"]:focus {
+  box-shadow: 0 0 0 4px rgba(146, 227, 169, 0.3); /* #92E3A9/30 */
+  border-color: rgba(17, 47, 42, 0.25); /* #112F2A */
 }
 
 /* 🔹 بطاقات الواجهات */
@@ -61,15 +83,12 @@ h5,
 h6 {
   @apply font-bold text-gray-900;
 }
-
 h1 {
   @apply text-3xl md:text-4xl;
 }
-
 h2 {
   @apply text-2xl;
 }
-
 h3 {
   @apply text-xl;
 }
@@ -83,25 +102,25 @@ p {
 ::-webkit-scrollbar {
   width: 8px;
 }
-
 ::-webkit-scrollbar-thumb {
   background-color: rgba(13, 22, 209, 0.5);
   border-radius: 10px;
 }
-
 ::-webkit-scrollbar-thumb:hover {
   background-color: rgba(13, 22, 209, 0.7);
 }
 
-/* 🔹 تدرج الخلفية الأساسي */
+/* =============================== */
+/* 🎨 تدرج الخلفية الأساسي — متناسق مع اللوقو */
+/* كان أزرقًا؛ الآن غامق (بنفسجي→أزرق بنفسجي→أخضر زيتي) مع لمعة خضراء خفيفة */
+/* =============================== */
 .bg-haseef-gradient {
-  background: linear-gradient(
-    to bottom right,
-    #0d16d1,
-    #4c4de9,
-    #47a241,
-    #97fc4a
-  );
+  background: radial-gradient(
+      circle at 20% 20%,
+      rgba(146, 227, 169, 0.1),
+      transparent 60%
+    ),
+    linear-gradient(135deg, #251e56 0%, #2b2d6b 30%, #184c4b 70%, #1f5e53 100%);
 }
 
 /* 🔹 تنسيق مركزي للمحتوى (لصفحات مثل Login / Register) */
@@ -113,6 +132,7 @@ p {
 .form-box {
   @apply bg-white rounded-2xl shadow-soft w-full max-w-md p-8;
 }
+
 /* ----- Dashboard visual tweaks to match mock exactly ----- */
 .shadow-soft {
   box-shadow: 0 8px 22px rgba(20, 20, 43, 0.06);
@@ -157,15 +177,15 @@ html[dir="rtl"],
 .shadow-col {
   box-shadow: 0 4px 10px rgba(76, 77, 233, 0.18);
 }
+
 /* ---- Green dropdowns (تحسين القائمة المنسدلة الخضراء) ---- */
-/* ---- Green dropdown ---- */
 .select-green {
   appearance: none;
   -webkit-appearance: none;
   -moz-appearance: none;
   background-color: #0e6b43;
   color: #fff;
-  border-radius: 1rem; /* حواف أنعم: rounded-2xl */
+  border-radius: 1rem; /* rounded-2xl */
   padding: 0.5rem 2rem; /* py-2 px-8 */
   height: 2.5rem; /* h-10 */
   font-weight: 600;
@@ -183,8 +203,6 @@ html[dir="rtl"],
 .select-green::-ms-expand {
   display: none;
 }
-
-/* القائمة المنسدلة نفسها بيضاء */
 .select-green option,
 .select-green optgroup {
   background: #fff !important;

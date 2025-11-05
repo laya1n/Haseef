@@ -1,5 +1,5 @@
 // src/pages/Insurance.tsx
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Bell,
@@ -14,6 +14,7 @@ import {
   Search,
   Loader2,
   TriangleAlert,
+  Home,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import clsx from "clsx";
@@ -28,7 +29,7 @@ type Claim = {
   status: "مرفوض" | "غير واضح" | "مقبول" | "يحتاج مراجعة";
   manager: string;
   note: string;
-  date?: string; // اختياري إن وُجد
+  date?: string;
 };
 
 type AiInsight = {
@@ -42,11 +43,12 @@ const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 const ENDPOINTS = {
   claims: "/api/insurance/claims",
-  analyze: "/api/ai/insurance/analyze", // غيّريه لمسارك المناسب
+  analyze: "/api/ai/insurance/analyze",
 };
 
 /* ============================== أدوات مساعدة ============================== */
 async function httpGet<T>(path: string, params?: Record<string, string>) {
+  // نضمن عنوانًا مطلقًا بتمرير origin
   const url = new URL(BASE_URL + path || path, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
@@ -72,6 +74,13 @@ async function httpPost<T>(path: string, body: unknown) {
 /* ============================== ثابتات الواجهة ============================== */
 const statuses = ["الكل", "مرفوض", "غير واضح", "مقبول", "يحتاج مراجعة"];
 const dates = ["الكل", "الأسبوع الأخير"];
+
+const brand = {
+  green: "#0E6B43",
+  greenHover: "#0f7d4d",
+  accent: "#97FC4A",
+  secondary: "#0D16D1",
+};
 
 /* ------------------------------ الصفحة ------------------------------ */
 export default function Insurance() {
@@ -183,7 +192,6 @@ export default function Insurance() {
           insurer: selInsurer,
           q: q.trim(),
         },
-        // يمكنكِ إرسال IDs فقط بدلاً من كامل العناصر لتقليل الحجم
         context: filtered,
       });
       setAi(res);
@@ -199,8 +207,14 @@ export default function Insurance() {
   }
 
   return (
-    <div className="min-h-screen bg-[#EEF1F8]">
-      <div className="grid grid-cols-[300px_1fr]">
+    <div
+      className="min-h-screen"
+      style={{
+        background:
+          "linear-gradient(180deg, #F5F7FB 0%, #E9EDF5 100%), radial-gradient(800px 500px at 15% 8%, rgba(146,227,169,0.15), transparent 60%)",
+      }}
+    >
+      <div className="grid grid-cols-[280px_1fr]">
         {/* الشريط الجانبي */}
         <aside
           className="min-h-screen border-l bg-white sticky top-0"
@@ -208,7 +222,6 @@ export default function Insurance() {
         >
           <div className="p-6 pb-4 flex items-center justify-between">
             <div className="text-2xl font-semibold">الشعار</div>
-            <UserRound className="size-6 text-black/70" />
           </div>
 
           <nav className="px-4 space-y-2">
@@ -243,6 +256,7 @@ export default function Insurance() {
             <button
               onClick={() => {
                 localStorage.removeItem("haseef_auth");
+                sessionStorage.removeItem("haseef_auth");
                 navigate("/login");
               }}
               className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg-black/5"
@@ -254,16 +268,26 @@ export default function Insurance() {
         </aside>
 
         {/* المحتوى الرئيسي */}
-        <main className="p-6 md:p-8" dir="rtl">
+        <main className="p-6 md:p-8 relative" dir="rtl">
+          {/* زر الرجوع للهوم (أيقونة فقط) */}
+          <button
+            onClick={() => navigate("/home")}
+            className="absolute top-4 right-4 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition"
+            title="العودة للصفحة الرئيسية"
+          >
+            <Home className="size-5" style={{ color: brand.green }} />
+          </button>
+
           {/* الهيدر */}
-          <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center justify-between gap-4 mt-2">
             {/* العنوان + الأيقونات */}
             <div className="flex items-center gap-3">
-              <div className="text-xl md:text-2xl font-semibold">
+              <div
+                className="text-xl md:text-2xl font-semibold"
+                style={{ color: brand.green }}
+              >
                 السجلات التأمينية
               </div>
-              <UserRound className="size-6 text-black/80" />
-              <Bell className="size-5 text-black/70" />
             </div>
 
             {/* البحث */}
@@ -271,37 +295,32 @@ export default function Insurance() {
               <input
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50"
+                className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50 focus:ring-4 focus:ring-emerald-300/30"
                 placeholder="ابحث..."
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/50" />
             </div>
 
             {/* الفلاتر */}
-            <div className="flex items-end gap-1.5 sm:gap-2 md:gap-2.5">
-              <FilterSelect
-                label="شركة التأمين"
-                value={selInsurer}
-                onChange={setSelInsurer}
-                options={["الكل", ...insurers]}
-                placeholder="اختر شركة"
-                minWidth="min-w-[8rem]"
-              />
-              <FilterSelect
+            <div className="flex items-end gap-2">
+              <Dropdown
                 label="حالة الطلب"
                 value={selStatus}
                 onChange={setSelStatus}
                 options={statuses}
-                placeholder="اختر الحالة"
-                minWidth="min-w-[8rem]"
               />
-              <FilterSelect
+              <Dropdown
+                label="شركة التأمين"
+                value={selInsurer}
+                onChange={setSelInsurer}
+                options={["الكل", ...insurers]}
+              />
+
+              <Dropdown
                 label="التاريخ"
                 value={selDate}
                 onChange={setSelDate}
                 options={dates}
-                placeholder="النطاق الزمني"
-                minWidth="min-w-[8rem]"
               />
             </div>
           </div>
@@ -320,7 +339,7 @@ export default function Insurance() {
               title="عدد المطالبات"
               value={filtered.length}
               bg="#D9DBFF"
-              text="#0D16D1"
+              text={brand.secondary}
             />
             <StatPill
               title="عدد شركات التأمين"
@@ -338,13 +357,13 @@ export default function Insurance() {
 
           {/* التحليل + الشارت */}
           <div className="mt-6 grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-5">
-            {/* بطاقة الذكاء الاصطناعي — تغطية كاملة */}
+            {/* بطاقة الذكاء الاصطناعي */}
             <div className="rounded-2xl shadow-ai overflow-hidden">
               <div
                 className="min-h-[260px] h-full p-6 text-white flex flex-col justify-between"
                 style={{
                   background:
-                    "linear-gradient(135deg, #2C34D4 0%, #4C4DE9 38%, #0D16D1 100%)",
+                    "linear-gradient(135deg, #2B2D6B 0%, #4C4DE9 42%, #0D16D1 100%)",
                 }}
               >
                 <div className="flex items-center justify-between">
@@ -354,10 +373,10 @@ export default function Insurance() {
                   </div>
 
                   <button
-                    onClick={runAi}
-                    disabled={aiLoading || loading || filtered.length === 0}
                     className="h-9 px-4 rounded-full bg-white text-[#0D16D1] text-sm font-semibold hover:bg-white/90 transition disabled:opacity-60 disabled:cursor-not-allowed"
                     type="button"
+                    onClick={runAi}
+                    disabled={aiLoading || loading}
                   >
                     {aiLoading ? (
                       <span className="inline-flex items-center gap-2">
@@ -523,7 +542,7 @@ function SideItem({
         "w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3 transition-colors",
         active ? "text-[#0D16D1] border border-black/10" : "hover:bg-black/5"
       )}
-      style={active ? { backgroundColor: "#97FC4A" } : {}}
+      style={active ? { backgroundColor: brand.accent } : {}}
     >
       <span className="font-medium">{label}</span>
       <span className="opacity-80">{icon}</span>
@@ -531,57 +550,74 @@ function SideItem({
   );
 }
 
-function FilterSelect({
+/** Dropdown مخصص (بديل select) */
+function Dropdown({
   label,
   value,
   onChange,
   options,
-  placeholder,
-  id,
-  minWidth = "min-w-[8rem]",
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   options: string[];
-  placeholder: string;
-  id?: string;
-  minWidth?: string;
 }) {
-  const selectId = id ?? `select-${label}`;
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onDoc(e: MouseEvent) {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, []);
+
   return (
-    <div className={clsx("flex flex-col gap-1", minWidth)}>
-      <label htmlFor={selectId} className="text-xs text-black/60 pr-1">
-        {label}
-      </label>
-      <div className="relative inline-block">
-        <select
-          id={selectId}
-          dir="rtl"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="
-            select-green
-            pr-9
-            rounded-2xl
-            border border-black/10
-            shadow-md
-            h-10
-            text-sm
-            focus:outline-none
-            focus:ring-4
-            focus:ring-emerald-300/30
-          "
-          style={{ WebkitAppearance: "none", MozAppearance: "none" }}
+    <div className="relative min-w-[8rem]" ref={ref}>
+      <label className="text-xs text-black/60 pr-1 block mb-1">{label}</label>
+      <button
+        type="button"
+        onClick={() => setOpen((s) => !s)}
+        className="h-10 w-full rounded-full bg-[#0E6B43] text-white font-semibold px-4 flex items-center justify-between text-sm shadow-md hover:bg-[#0f7d4d] transition"
+      >
+        <span className="truncate">{value}</span>
+        <svg
+          className={clsx("size-4 transition-transform", open && "rotate-180")}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          viewBox="0 0 24 24"
         >
-          <option hidden>{placeholder}</option>
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M19 9l-7 7-7-7"
+          />
+        </svg>
+      </button>
+
+      {open && (
+        <ul className="absolute mt-2 w-full bg-white rounded-xl border border-gray-200 shadow-lg overflow-hidden z-50">
           {options.map((opt) => (
-            <option key={opt} value={opt} className="bg-white text-black">
-              {opt}
-            </option>
+            <li key={opt}>
+              <button
+                type="button"
+                onClick={() => {
+                  onChange(opt);
+                  setOpen(false);
+                }}
+                className={clsx(
+                  "w-full text-right px-4 py-2 text-sm hover:bg-emerald-50",
+                  value === opt && "bg-emerald-50 font-semibold text-[#0E6B43]"
+                )}
+              >
+                {opt}
+              </button>
+            </li>
           ))}
-        </select>
-      </div>
+        </ul>
+      )}
     </div>
   );
 }

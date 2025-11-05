@@ -1,152 +1,118 @@
-// src/pages/Home.tsx
-import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ActivitySquare, Shield, Pill, ArrowRight, Bell } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ClipboardList, Shield, Pill, LogOut } from "lucide-react";
 
 export default function Home() {
   const navigate = useNavigate();
-  const [isAuthed, setIsAuthed] = useState(false);
 
-  useEffect(() => {
-    setIsAuthed(!!localStorage.getItem("haseef_auth"));
-  }, []);
-
-  const logout = () => {
+  const handleLogout = () => {
+    // إزالة بيانات تسجيل الدخول
     localStorage.removeItem("haseef_auth");
-    setIsAuthed(false);
-    navigate("/login");
+    sessionStorage.removeItem("haseef_auth");
+
+    // إعادة التوجيه إلى صفحة تسجيل الدخول
+    navigate("/");
   };
 
   return (
     <div
       dir="rtl"
-      className="min-h-screen text-white"
+      className="min-h-screen flex flex-col items-center justify-center px-6 py-10 text-center text-white relative"
       style={{
-        // خلفية ملوّنة ناعمة (متوافقة مع ألوان البراند)
-        background:
-          "radial-gradient(1200px 700px at 75% 20%, rgba(151,252,74,0.45), transparent 60%), radial-gradient(1200px 700px at 20% 15%, rgba(76,77,233,0.55), transparent 60%), linear-gradient(135deg, #0D16D1 0%, #4C4DE9 40%, #2F78D6 65%, #59C08B 100%)",
+        background: `
+          radial-gradient(circle at 20% 20%, rgba(60, 255, 180, 0.1), transparent 60%),
+          linear-gradient(135deg, #251E56 0%, #2B2D6B 30%, #184C4B 70%, #1F5E53 100%)
+        `,
       }}
     >
-      {/* شريط علوي */}
-      <header className="max-w-6xl mx-auto px-5 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-2 text-white/90">
-          <Bell className="size-5" />
-        </div>
+      {/* زر تسجيل الخروج */}
+      <div className="absolute top-6 left-6">
+        <button
+          onClick={handleLogout}
+          className="px-5 py-2 rounded-full border border-white/70 text-white/90 hover:bg-white/10 transition font-medium text-sm flex items-center gap-2"
+        >
+          <LogOut className="size-4" />
+          تسجيل خروج
+        </button>
+      </div>
 
-        <div className="flex items-center gap-2">
-          {isAuthed ? (
-            <button
-              onClick={logout}
-              className="h-10 px-4 rounded-xl border border-white/35 bg-white/10 hover:bg-white/20 transition"
-            >
-              تسجيل خروج
-            </button>
-          ) : (
-            <Link
-              to="/login"
-              className="h-10 px-4 rounded-xl bg-white text-[#0D16D1] hover:bg-white/90 transition"
-            >
-              تسجيل الدخول
-            </Link>
-          )}
-        </div>
-      </header>
-
-      {/* الهيرو */}
-      <section className="max-w-6xl mx-auto px-5 pt-10 pb-8 md:pt-16 md:pb-12">
-        <h1 className="text-3xl sm:text-4xl md:text-5xl font-extrabold leading-snug">
-          مرحبًا بك في نظام <span className="text-[#97FC4A]">حصيف</span> الذكي
-          <br className="hidden md:block" /> لتحليل الأنماط الصحية
+      {/* العنوان الرئيسي */}
+      <div className="max-w-3xl mb-10">
+        <h1 className="text-3xl md:text-4xl font-bold leading-snug text-white drop-shadow-md">
+          مرحباً بك في نظام <span className="text-[#92E3A9]">حصيف الذكي</span>{" "}
+          لتحليل الأنماط الصحية
         </h1>
-
-        <p className="mt-4 max-w-2xl text-white/90 leading-relaxed">
+        <p className="mt-3 text-white/80 text-sm md:text-base">
           منصة تحليل الأنماط الصحية لمتابعة جودة الخدمات الطبية والتأمينية وصرف
           الأدوية باستخدام الذكاء الاصطناعي.
         </p>
 
-        <div className="mt-6">
-          <button
-            onClick={() => navigate(isAuthed ? "/dashboard" : "/login")}
-            className="h-11 px-5 rounded-2xl bg-white text-[#0D16D1] font-semibold hover:bg-white/90 shadow"
-          >
-            لوحة المتابعة
-          </button>
+        <Link
+          to="/dashboard"
+          className="inline-block mt-6 px-6 py-3 rounded-xl bg-[#92E3A9] text-[#112F2A] font-semibold hover:bg-[#7ED8A0] transition"
+        >
+          لوحة المتابعة
+        </Link>
+      </div>
+
+      {/* البطاقات */}
+      <div className="flex flex-col md:flex-row gap-6 justify-center max-w-5xl">
+        {/* الأنماط الطبية */}
+        <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-6 w-full md:w-72 shadow-lg hover:translate-y-[-5px] hover:shadow-xl transition">
+          <div className="flex flex-col items-center">
+            <ClipboardList className="size-8 text-[#92E3A9] mb-3" />
+            <h3 className="text-lg font-semibold text-white mb-1">
+              الأنماط الطبية
+            </h3>
+            <p className="text-white/80 text-sm mb-4">
+              تحليل سلوك الأطباء والتشخيصات للكشف عن الأنماط غير الطبيعية.
+            </p>
+            <Link
+              to="/patterns"
+              className="text-sm font-medium bg-[#92E3A9] text-[#112F2A] px-4 py-2 rounded-lg hover:bg-[#7ED8A0] transition"
+            >
+              اذهب للوحة الأنماط →
+            </Link>
+          </div>
         </div>
-      </section>
 
-      {/* بطاقات الميزات */}
-      <section className="max-w-6xl mx-auto px-5 pb-16">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          {/* الأنماط الطبية */}
-          <FeatureCard
-            title="الأنماط الطبية"
-            icon={<ActivitySquare className="size-5" />}
-            description="تحليل سلوك الأطباء والتشخيصات للكشف عن الأنماط غير الطبيعية."
-            cta="اذهب للوحة الأنماط"
-            onClick={() => navigate(isAuthed ? "/dashboard" : "/login")}
-          />
-
-          {/* السجلات التأمينية */}
-          <FeatureCard
-            title="السجلات التأمينية"
-            icon={<Shield className="size-5" />}
-            description="متابعة المطالبات واكتشاف الرفض غير المبرر وأنماط شركات التأمين."
-            cta="سجلات التأمين"
-            onClick={() => navigate(isAuthed ? "/insurance" : "/login")}
-          />
-
-          {/* صرف الأدوية */}
-          <FeatureCard
-            title="صرف الأدوية"
-            icon={<Pill className="size-5" />}
-            description="تحليل كميات وأصناف الأدوية ومراقبة الصرف غير المناسب."
-            cta="لوحة الأدوية"
-            onClick={() => navigate(isAuthed ? "/drugs" : "/login")}
-          />
+        {/* السجلات التأمينية */}
+        <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-6 w-full md:w-72 shadow-lg hover:translate-y-[-5px] hover:shadow-xl transition">
+          <div className="flex flex-col items-center">
+            <Shield className="size-8 text-[#92E3A9] mb-3" />
+            <h3 className="text-lg font-semibold text-white mb-1">
+              السجلات التأمينية
+            </h3>
+            <p className="text-white/80 text-sm mb-4">
+              متابعة المطالبات واكتشاف الرفض غير المبرر وأنماط شركات التأمين.
+            </p>
+            <Link
+              to="/insurance"
+              className="text-sm font-medium bg-[#92E3A9] text-[#112F2A] px-4 py-2 rounded-lg hover:bg-[#7ED8A0] transition"
+            >
+              سجلات التأمين →
+            </Link>
+          </div>
         </div>
-      </section>
+
+        {/* صرف الأدوية */}
+        <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-6 w-full md:w-72 shadow-lg hover:translate-y-[-5px] hover:shadow-xl transition">
+          <div className="flex flex-col items-center">
+            <Pill className="size-8 text-[#92E3A9] mb-3" />
+            <h3 className="text-lg font-semibold text-white mb-1">
+              صرف الأدوية
+            </h3>
+            <p className="text-white/80 text-sm mb-4">
+              تحليل كميات وأصناف الأدوية ومراقبة الصرف غير المناسب.
+            </p>
+            <Link
+              to="/drugs"
+              className="text-sm font-medium bg-[#92E3A9] text-[#112F2A] px-4 py-2 rounded-lg hover:bg-[#7ED8A0] transition"
+            >
+              لوحة الأدوية →
+            </Link>
+          </div>
+        </div>
+      </div>
     </div>
-  );
-}
-
-/* --------- مكوّن بطاقة ميزة --------- */
-function FeatureCard({
-  title,
-  description,
-  icon,
-  cta,
-  onClick,
-}: {
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  cta: string;
-  onClick: () => void;
-}) {
-  return (
-    <Card className="bg-white/15 backdrop-blur-md border-white/20 text-white shadow-[0_8px_22px_rgba(0,0,0,0.15)]">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2">
-          <span className="inline-flex items-center justify-center size-8 rounded-xl bg-white/15">
-            {icon}
-          </span>
-          <span>{title}</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <p className="text-white/90 leading-relaxed">{description}</p>
-
-        <div className="mt-4">
-          <button
-            onClick={onClick}
-            className="inline-flex items-center gap-1 h-10 px-4 rounded-xl bg-white text-[#0D16D1] hover:bg-white/90 transition"
-          >
-            {cta}
-            <ArrowRight className="size-4" />
-          </button>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
