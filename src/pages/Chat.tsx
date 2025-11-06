@@ -1,6 +1,7 @@
 // src/pages/Chat.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import logo from "@/assets/logo2.png";
 import {
   Bell,
   Plus,
@@ -11,14 +12,11 @@ import {
   LogOut,
   Send,
   Bot,
-  Paperclip,
-  Mic,
-  Smile,
-  Sparkles,
   Loader2,
   TriangleAlert,
   Home,
   UserRound,
+  Sparkles,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -117,7 +115,6 @@ export default function Chat() {
   const [error, setError] = useState<string | null>(null);
   const [useStreaming, setUseStreaming] = useState(true); // يمكنكِ إطفاءه إذا كان الـbackend لا يدعم البثّ
 
-  const fileRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
@@ -216,25 +213,6 @@ export default function Chat() {
 
   const headerTitle = useMemo(() => "مساعد ذكي", []);
 
-  /* --------------- Attachments (hook فقط) --------------- */
-  const handleAttach = async (file: File) => {
-    try {
-      // هنا يضاف رفع الملف إن رغبتِ
-      setMessages((m) => [
-        ...m,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: `تم إرفاق ملف: ${file.name}`,
-          time: nowTime(),
-          sourceTag: "Attachment",
-        },
-      ]);
-    } catch {
-      setError("تعذر رفع المرفق. تحقّقي من إعدادات الخادم.");
-    }
-  };
-
   return (
     <div
       className="min-h-screen"
@@ -245,41 +223,46 @@ export default function Chat() {
     >
       <div className="grid grid-cols-[280px_1fr]">
         {/* Sidebar — مطابق للداشبورد */}
-        <aside
-          className="min-h-screen border-l bg-white sticky top-0"
-          dir="rtl"
-        >
-          <div className="p-6 pb-4 flex items-center justify-between">
-            <div className="text-2xl font-semibold">الشعار</div>
+        <aside className="min-h-screen border-l bg-white sticky top-0 relative flex flex-col justify-between">
+          {/* الشعار في الزاوية العلوية اليمنى */}
+          <div className="absolute top-4 right-4">
+            <img
+              src={logo}
+              alt="شعار حصيف الذكي"
+              className="w-10 md:w-12 drop-shadow-sm select-none"
+            />
           </div>
 
-          <nav className="px-4 space-y-2">
-            <SideItem
-              icon={<Plus className="size-4" />}
-              label="طب"
-              onClick={() => navigate("/dashboard")}
-            />
-            <SideItem
-              icon={<Shield className="size-4" />}
-              label="التأمين"
-              onClick={() => navigate("/insurance")}
-            />
-            <SideItem
-              icon={<Pill className="size-4" />}
-              label="دواء"
-              onClick={() => navigate("/drugs")}
-            />
-            <SideItem
-              icon={<BellRing className="size-4" />}
-              label="إشعارات"
-              onClick={() => navigate("/notifications")}
-            />
-            <SideItem
-              active
-              icon={<MessageSquareCode className="size-4" />}
-              label="مساعد ذكي"
-            />
-          </nav>
+          {/* محتوى القائمة */}
+          <div className="p-6 pt-20 space-y-4 flex-1">
+            <nav className="px-4 space-y-2">
+              <SideItem
+                icon={<Plus className="size-4" />}
+                label="السجلات الطبية"
+                onClick={() => navigate("/dashboard")}
+              />
+              <SideItem
+                icon={<Shield className="size-4" />}
+                label="السجلات التأمينية"
+                onClick={() => navigate("/insurance")}
+              />
+              <SideItem
+                icon={<Pill className="size-4" />}
+                label="سجلات الأدوية"
+                onClick={() => navigate("/drugs")}
+              />
+              <SideItem
+                icon={<BellRing className="size-4" />}
+                label="الاشعارات"
+                onClick={() => navigate("/notifications")}
+              />
+              <SideItem
+                active
+                icon={<MessageSquareCode className="size-4" />}
+                label="المساعد ذكي"
+              />
+            </nav>
+          </div>
 
           <div className="mt-auto px-4 pt-10 pb-6">
             <button
@@ -374,36 +357,10 @@ export default function Chat() {
             </div>
           </div>
 
-          {/* Composer */}
+          {/* Composer — بدون مرفقات/مايك/إيموجي */}
           <div className="mt-4 mx-auto max-w-3xl">
             <div className="rounded-2xl bg-white border border-black/10 shadow-soft p-3">
               <div className="flex items-end gap-2">
-                <input
-                  ref={fileRef}
-                  type="file"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleAttach(file);
-                    e.currentTarget.value = "";
-                  }}
-                />
-
-                <button
-                  className="h-10 w-10 rounded-full grid place-items-center hover:bg-black/5"
-                  title="مرفق"
-                  onClick={() => fileRef.current?.click()}
-                >
-                  <Paperclip className="size-5 text-black/70" />
-                </button>
-
-                <button
-                  className="h-10 w-10 rounded-full grid place-items-center hover:bg-black/5"
-                  title="إيموجي"
-                >
-                  <Smile className="size-5 text-black/70" />
-                </button>
-
                 <textarea
                   ref={taRef}
                   dir="rtl"
@@ -437,13 +394,6 @@ export default function Chat() {
                     <span>إرسال</span>
                     <Send className="size-4" />
                   </div>
-                </button>
-
-                <button
-                  className="h-10 w-10 rounded-full grid place-items-center hover:bg-black/5"
-                  title="مايك (لاحقًا)"
-                >
-                  <Mic className="size-5 text-black/70" />
                 </button>
               </div>
             </div>
@@ -503,7 +453,7 @@ function MessageBubble({ msg }: { msg: Msg }) {
           className={clsx(
             "rounded-2xl px-4 py-2 leading-7 text-[15px] shadow-sm",
             isUser
-              ? "bg-[#4C4DE9] text-white rounded-tr-sm"
+              ? "bg-[#F8F9FF] text-white rounded-tr-sm" // خلفية المستخدمض
               : "bg-white text-neutral-900 border border-black/10 rounded-tl-sm"
           )}
         >

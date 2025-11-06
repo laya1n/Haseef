@@ -29,12 +29,11 @@ export default function Register() {
 
   const [name, setName] = useState("");
   const [national_id, setNationalId] = useState("");
-  const [email, setEmail] = useState("");
+
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [showConf, setShowConf] = useState(false);
-  const [agree, setAgree] = useState(false);
 
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
@@ -46,15 +45,14 @@ export default function Register() {
     if (!name.trim()) return "الاسم مطلوب.";
     if (!/^\d{10}$/.test(national_id))
       return "رقم الهوية يجب أن يتكون من 10 أرقام.";
-    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
-      return "صيغة البريد غير صحيحة.";
+
     if (password.length < 6) return "كلمة المرور يجب ألا تقل عن 6 أحرف.";
     if (password !== confirm) return "كلمتا المرور غير متطابقتين.";
-    if (!agree) return "الرجاء الموافقة على الشروط.";
+
     return "";
   };
 
-  const onSubmit = async(e: React.FormEvent) => {
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const v = validate();
     if (v) {
@@ -72,23 +70,22 @@ export default function Register() {
     //setOk("تم إنشاء الحساب بنجاح! سيتم تحويلك لتسجيل الدخول.");
     //setTimeout(() => navigate("/login"), 900);
     try {
-        const res = await fetch("https://haseef.onrender.com/auth/register", {
+      const res = await fetch("https://haseef.onrender.com/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
 
-  if (res.ok) {
+      if (res.ok) {
         setOk("تم إنشاء الحساب بنجاح! سيتم تحويلك لتسجيل الدخول.");
-        setTimeout(() => navigate("/login"), 900);
+        setTimeout(() => navigate("/"), 900);
       } else {
         const data = await res.json();
         setErr(data.detail || "حدث خطأ أثناء التسجيل.");
+      }
+    } catch (error) {
+      setErr("تعذر الاتصال بالخادم. تأكد من أن الخادم يعمل.");
     }
-  } catch (error) {
-    setErr("تعذر الاتصال بالخادم. تأكد من أن الخادم يعمل.");
-  }
-
   };
 
   return (
@@ -122,7 +119,7 @@ export default function Register() {
               <input
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="مثال: لين السليماني"
+                placeholder="الاسم الثلاثي"
                 className="w-full h-12 pr-12 pl-4 rounded-xl border border-black/10 bg-white text-[15px] focus:outline-none focus:ring-4 focus:ring-[#92E3A9]/30"
               />
               {!name && (
@@ -226,17 +223,6 @@ export default function Register() {
               </button>
             </div>
           </div>
-
-          {/* الموافقة على الشروط */}
-          <label className="flex items-center gap-2 text-sm text-black/70 select-none">
-            <input
-              type="checkbox"
-              checked={agree}
-              onChange={(e) => setAgree(e.target.checked)}
-              className="size-4 rounded border-black/30"
-            />
-            أوافق على الشروط وسياسة الخصوصية.
-          </label>
 
           {/* رسائل */}
           {err && (

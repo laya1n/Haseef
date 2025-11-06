@@ -1,5 +1,6 @@
 import { Link, useNavigate } from "react-router-dom";
 import { ClipboardList, Shield, Pill, LogOut } from "lucide-react";
+import logo from "@/assets/logo.png"; // ✅ شعار حصيف
 
 export default function Home() {
   const navigate = useNavigate();
@@ -8,8 +9,6 @@ export default function Home() {
     // إزالة بيانات تسجيل الدخول
     localStorage.removeItem("haseef_auth");
     sessionStorage.removeItem("haseef_auth");
-
-    // إعادة التوجيه إلى صفحة تسجيل الدخول
     navigate("/");
   };
 
@@ -24,6 +23,15 @@ export default function Home() {
         `,
       }}
     >
+      {/* ✅ الشعار في الزاوية العلوية اليمنى */}
+      <div className="absolute top-6 right-6">
+        <img
+          src={logo}
+          alt="شعار حصيف الذكي"
+          className="w-16 md:w-16 drop-shadow-lg select-none"
+        />
+      </div>
+
       {/* زر تسجيل الخروج */}
       <div className="absolute top-6 left-6">
         <button
@@ -36,7 +44,7 @@ export default function Home() {
       </div>
 
       {/* العنوان الرئيسي */}
-      <div className="max-w-3xl mb-10">
+      <div className="max-w-3xl mb-10 mt-10">
         <h1 className="text-3xl md:text-4xl font-bold leading-snug text-white drop-shadow-md">
           مرحباً بك في نظام <span className="text-[#92E3A9]">حصيف الذكي</span>{" "}
           لتحليل الأنماط الصحية
@@ -67,7 +75,7 @@ export default function Home() {
               تحليل سلوك الأطباء والتشخيصات للكشف عن الأنماط غير الطبيعية.
             </p>
             <Link
-              to="/patterns"
+              to="/dashboard"
               className="text-sm font-medium bg-[#92E3A9] text-[#112F2A] px-4 py-2 rounded-lg hover:bg-[#7ED8A0] transition"
             >
               اذهب للوحة الأنماط →

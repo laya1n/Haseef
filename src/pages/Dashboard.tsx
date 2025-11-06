@@ -1,6 +1,7 @@
 // src/pages/Dashboard.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import logo from "@/assets/logo2.png";
 import {
   Bell,
   UserRound,
@@ -35,7 +36,16 @@ type AiInsight = {
 };
 
 /* ============================== إعدادات API ============================== */
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+/** ملاحظة: وحّد اسم المتغير في المشروع كله (هنا: VITE_API_BASE_URL) */
+const RAW_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
+/** تنظيف المسار حتى لا نحصل على // مزدوج */
+function joinUrl(base: string, path: string) {
+  if (!base) return path;
+  const b = base.endsWith("/") ? base.slice(0, -1) : base;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${b}${p}`;
+}
 
 const ENDPOINTS = {
   records: "/api/medical/records",
@@ -44,8 +54,8 @@ const ENDPOINTS = {
 
 /* ============================== أدوات مساعدة ============================== */
 async function httpGet<T>(path: string, params?: Record<string, string>) {
-  // نضمن عنوانًا مطلقًا بتمرير origin
-  const url = new URL(BASE_URL + path || path, window.location.origin);
+  const full = joinUrl(RAW_BASE_URL, path);
+  const url = new URL(full, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
       if (v !== "" && v !== "الكل") url.searchParams.set(k, v);
@@ -57,7 +67,8 @@ async function httpGet<T>(path: string, params?: Record<string, string>) {
 }
 
 async function httpPost<T>(path: string, body: unknown) {
-  const res = await fetch(BASE_URL + path || path, {
+  const full = joinUrl(RAW_BASE_URL, path);
+  const res = await fetch(full, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -204,43 +215,56 @@ export default function Dashboard() {
     >
       <div className="grid grid-cols-[280px_1fr]">
         {/* Sidebar */}
-        <aside className="min-h-screen border-l bg-white sticky top-0">
-          <div className="p-6 pb-4 flex items-center justify-between">
-            <div className="text-2xl font-semibold">الشعار</div>
+        <aside className="min-h-screen border-l bg-white sticky top-0 relative flex flex-col justify-between">
+          {/* الشعار في الزاوية العلوية اليمنى */}
+          <div className="absolute top-4 right-4">
+            <img
+              src={logo}
+              alt="شعار حصيف الذكي"
+              className="w-10 md:w-12 drop-shadow-sm select-none"
+            />
           </div>
 
-          <nav className="px-4 space-y-2">
-            <SideItem active icon={<Plus className="size-4" />} label="طب" />
-            <SideItem
-              icon={<Shield className="size-4" />}
-              label="التأمين"
-              onClick={() => navigate("/insurance")}
-            />
-            <SideItem
-              icon={<Pill className="size-4" />}
-              label="دواء"
-              onClick={() => navigate("/drugs")}
-            />
-            <SideItem
-              icon={<BellRing className="size-4" />}
-              label="إشعارات"
-              onClick={() => navigate("/notifications")}
-            />
-            <SideItem
-              icon={<MessageSquareCode className="size-4" />}
-              label="مساعد ذكي"
-              onClick={() => navigate("/chat")}
-            />
-          </nav>
+          {/* محتوى القائمة */}
+          <div className="p-6 pt-20 space-y-4 flex-1">
+            <nav className="px-4 space-y-2">
+              <SideItem
+                active
+                icon={<Plus className="size-4" />}
+                label="السجلات الطبية"
+              />
+              <SideItem
+                icon={<Shield className="size-4" />}
+                label="السجلات التأمينية"
+                onClick={() => navigate("/insurance")}
+              />
+              <SideItem
+                icon={<Pill className="size-4" />}
+                label="سجلات الأدوية"
+                onClick={() => navigate("/drugs")}
+              />
+              <SideItem
+                icon={<BellRing className="size-4" />}
+                label="الاشعارات"
+                onClick={() => navigate("/notifications")}
+              />
+              <SideItem
+                icon={<MessageSquareCode className="size-4" />}
+                label="المساعد ذكي"
+                onClick={() => navigate("/chat")}
+              />
+            </nav>
+          </div>
 
-          <div className="mt-auto px-4 pt-10 pb-6">
+          {/* زر تسجيل الخروج */}
+          <div className="mt-auto px-4 pt-4 pb-6">
             <button
               onClick={() => {
                 localStorage.removeItem("haseef_auth");
                 sessionStorage.removeItem("haseef_auth");
                 navigate("/");
               }}
-              className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg-black/5"
+              className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg-black/5 transition"
             >
               <span className="text-black/80">تسجيل الخروج</span>
               <LogOut className="size-4" />
@@ -295,7 +319,6 @@ export default function Dashboard() {
                 onChange={setSelDoctor}
                 options={["الكل", ...doctors]}
               />
-
               <Dropdown
                 label="التاريخ"
                 value={selDate}
@@ -327,7 +350,6 @@ export default function Dashboard() {
               bg="#CDEFE3"
               text="#1B4D3B"
             />
-
             <StatPill
               title="عدد التنبيهات"
               value={"—"}
@@ -482,7 +504,8 @@ export default function Dashboard() {
                           key={r.id}
                           className={clsx(
                             "border-t border-black/5",
-                            i % 2 === 1 && "bg-black/2.5"
+                            // استخدمنا قيمة مخصصة مدعومة من Tailwind:
+                            i % 2 === 1 && "bg-black/[0.025]"
                           )}
                         >
                           <Td>{r.id}</Td>
@@ -507,7 +530,7 @@ export default function Dashboard() {
 
 /* ============================== مكوّنات فرعية ============================== */
 
-// عنصر القائمة الجانبية (نسخة واحدة فقط)
+// عنصر القائمة الجانبية (نسخة واحدة فقط داخل نفس الملف)
 function SideItem({
   icon,
   label,
@@ -534,7 +557,7 @@ function SideItem({
   );
 }
 
-// Dropdown مخصص
+// DropDown مخصص
 function Dropdown({
   label,
   value,

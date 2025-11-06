@@ -1,6 +1,7 @@
 // src/pages/Notifications.tsx
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import logo from "@/assets/logo2.png";
 import {
   Bell,
   Plus,
@@ -231,41 +232,46 @@ export default function Notifications() {
     >
       <div className="grid grid-cols-[280px_1fr]">
         {/* Sidebar — مطابق للداشبورد */}
-        <aside
-          className="min-h-screen border-l bg-white sticky top-0"
-          dir="rtl"
-        >
-          <div className="p-6 pb-4 flex items-center justify-between">
-            <div className="text-2xl font-semibold">الشعار</div>
+        <aside className="min-h-screen border-l bg-white sticky top-0 relative flex flex-col justify-between">
+          {/* الشعار في الزاوية العلوية اليمنى */}
+          <div className="absolute top-4 right-4">
+            <img
+              src={logo}
+              alt="شعار حصيف الذكي"
+              className="w-10 md:w-12 drop-shadow-sm select-none"
+            />
           </div>
 
-          <nav className="px-4 space-y-2">
-            <SideItem
-              icon={<Plus className="size-4" />}
-              label="طب"
-              onClick={() => navigate("/dashboard")}
-            />
-            <SideItem
-              icon={<Shield className="size-4" />}
-              label="التأمين"
-              onClick={() => navigate("/insurance")}
-            />
-            <SideItem
-              icon={<Pill className="size-4" />}
-              label="دواء"
-              onClick={() => navigate("/drugs")}
-            />
-            <SideItem
-              active
-              icon={<BellRing className="size-4" />}
-              label="إشعارات"
-            />
-            <SideItem
-              icon={<MessageSquareCode className="size-4" />}
-              label="مساعد ذكي"
-              onClick={() => navigate("/chat")}
-            />
-          </nav>
+          {/* محتوى القائمة */}
+          <div className="p-6 pt-20 space-y-4 flex-1">
+            <nav className="px-4 space-y-2">
+              <SideItem
+                icon={<Plus className="size-4" />}
+                label="السجلات الطبية"
+                onClick={() => navigate("/dashboard")}
+              />
+              <SideItem
+                icon={<Shield className="size-4" />}
+                label="السجلات التأمينية"
+                onClick={() => navigate("/insurance")}
+              />
+              <SideItem
+                icon={<Pill className="size-4" />}
+                label="سجلات الأدوية"
+                onClick={() => navigate("/drugs")}
+              />
+              <SideItem
+                active
+                icon={<BellRing className="size-4" />}
+                label="الاشعارات"
+              />
+              <SideItem
+                icon={<MessageSquareCode className="size-4" />}
+                label="المساعد ذكي"
+                onClick={() => navigate("/chat")}
+              />
+            </nav>
+          </div>
 
           <div className="mt-auto px-4 pt-10 pb-6">
             <button

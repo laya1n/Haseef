@@ -1,6 +1,7 @@
 // src/pages/Insurance.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import logo from "@/assets/logo2.png";
 import {
   Bell,
   UserRound,
@@ -216,48 +217,53 @@ export default function Insurance() {
     >
       <div className="grid grid-cols-[280px_1fr]">
         {/* الشريط الجانبي */}
-        <aside
-          className="min-h-screen border-l bg-white sticky top-0"
-          dir="rtl"
-        >
-          <div className="p-6 pb-4 flex items-center justify-between">
-            <div className="text-2xl font-semibold">الشعار</div>
+        <aside className="min-h-screen border-l bg-white sticky top-0 relative flex flex-col justify-between">
+          {/* الشعار في الزاوية العلوية اليمنى */}
+          <div className="absolute top-4 right-4">
+            <img
+              src={logo}
+              alt="شعار حصيف الذكي"
+              className="w-10 md:w-12 drop-shadow-sm select-none"
+            />
           </div>
 
-          <nav className="px-4 space-y-2">
-            <SideItem
-              icon={<Plus className="size-4" />}
-              label="طب"
-              onClick={() => navigate("/dashboard")}
-            />
-            <SideItem
-              active
-              icon={<Shield className="size-4" />}
-              label="التأمين"
-            />
-            <SideItem
-              icon={<Pill className="size-4" />}
-              label="دواء"
-              onClick={() => navigate("/drugs")}
-            />
-            <SideItem
-              icon={<BellRing className="size-4" />}
-              label="إشعارات"
-              onClick={() => navigate("/notifications")}
-            />
-            <SideItem
-              icon={<MessageSquareCode className="size-4" />}
-              label="مساعد ذكي"
-              onClick={() => navigate("/chat")}
-            />
-          </nav>
+          {/* محتوى القائمة */}
+          <div className="p-6 pt-20 space-y-4 flex-1">
+            <nav className="px-4 space-y-2">
+              <SideItem
+                icon={<Plus className="size-4" />}
+                label="السجلات الطبية"
+                onClick={() => navigate("/dashboard")}
+              />
+              <SideItem
+                active
+                icon={<Shield className="size-4" />}
+                label="السجلات التأمينية"
+              />
+              <SideItem
+                icon={<Pill className="size-4" />}
+                label="سجلات الأدوية"
+                onClick={() => navigate("/drugs")}
+              />
+              <SideItem
+                icon={<BellRing className="size-4" />}
+                label="الاشعارات"
+                onClick={() => navigate("/notifications")}
+              />
+              <SideItem
+                icon={<MessageSquareCode className="size-4" />}
+                label="المساعد ذكي"
+                onClick={() => navigate("/chat")}
+              />
+            </nav>
+          </div>
 
           <div className="mt-auto px-4 pt-10 pb-6">
             <button
               onClick={() => {
                 localStorage.removeItem("haseef_auth");
                 sessionStorage.removeItem("haseef_auth");
-                navigate("/login");
+                navigate("/");
               }}
               className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg-black/5"
             >

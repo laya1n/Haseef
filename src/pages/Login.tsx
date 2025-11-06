@@ -43,7 +43,8 @@ export default function Login() {
   const [ok, setOk] = useState("");
 
   const canSubmit = useMemo(
-    () => isValidSaudiNID(national_id) && password.trim().length > 0 && !loading,
+    () =>
+      isValidSaudiNID(national_id) && password.trim().length > 0 && !loading,
     [national_id, password, loading]
   );
 
@@ -67,32 +68,32 @@ export default function Login() {
     //  return;
     //}
     setLoading(true);
-  try {
-    const res = await fetch("https://haseef.onrender.com/auth/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ national_id, password }),
-    });
+    try {
+      const res = await fetch("https://haseef.onrender.com/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ national_id, password }),
+      });
 
-    const data = await res.json();
+      const data = await res.json();
 
-    if (res.ok) {
-      setOk("تم تسجيل الدخول بنجاح.");
-      setTimeout(() => navigate(REDIRECT_PATH), 700);
-    } else {
-      setErr(data.detail || "رقم الهوية أو كلمة المرور غير صحيحة.");
+      if (res.ok) {
+        setOk("تم تسجيل الدخول بنجاح.");
+        setTimeout(() => navigate(REDIRECT_PATH), 700);
+      } else {
+        setErr(data.detail || "رقم الهوية أو كلمة المرور غير صحيحة.");
+      }
+    } catch (error) {
+      setErr("تعذر الاتصال بالخادم.");
+    } finally {
+      setLoading(false);
     }
-  } catch (error) {
-    setErr("تعذر الاتصال بالخادم.");
-  } finally {
-    setLoading(false);
-    }
 
-  //  const user: StoredUser = JSON.parse(raw);
-  //  if (user.nationalId !== nationalId || user.password !== password) {
-  //    setErr("رقم الهوية أو كلمة المرور غير صحيحة.");
-  //    return;
-  //  } this is commented because now the backend is doing the actual authentication no need for local checks
+    //  const user: StoredUser = JSON.parse(raw);
+    //  if (user.nationalId !== nationalId || user.password !== password) {
+    //    setErr("رقم الهوية أو كلمة المرور غير صحيحة.");
+    //    return;
+    //  } this is commented because now the backend is doing the actual authentication no need for local checks
 
     setLoading(true);
     const token = { national_id, at: Date.now() };
