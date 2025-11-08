@@ -66,4 +66,13 @@ def get_medical_records(
         one_week_ago = datetime.now() - timedelta(days=7)
         df = df[df["treatment_date"] >= one_week_ago]
 
-    return df.fillna("").to_dict(orient="records")
+    total_records = len(df)
+    total_doctors = df["doctor_name"].nunique()
+    alerts_count = 0  # placeholder until AI agent adds logic
+
+    return {
+        "total_records": total_records,
+        "total_doctors": total_doctors,
+        "alerts_count": alerts_count,
+        "records": df.fillna("").to_dict(orient="records"),
+    }
