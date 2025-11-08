@@ -32,7 +32,7 @@ def register(user: UserCreate, db: Session = Depends(get_db)):
     return {"message": "Registered successfully!"}
 
 
-@router.post("/login")
+@router.post("/")
 def login(user: UserLogin, db: Session = Depends(get_db)):
     db_user = db.query(User).filter(User.national_id == user.national_id).first()
     if not db_user:

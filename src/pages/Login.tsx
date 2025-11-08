@@ -11,13 +11,14 @@ import {
 } from "lucide-react";
 
 /* ============================== Types ============================== */
-type StoredUser = {
-  national_id: string;
-  password: string;
-  name?: string;
-  email?: string;
-  phone?: string;
+type AuthStorage = {
+  token: string;
+  at: number; // timestamp
 };
+
+type ApiLoginResponse =
+  | { access_token: string; token_type: "bearer" }
+  | { detail: string };
 
 /* ============================== Utils ============================== */
 // يحوّل ٠١٢٣٤٥٦٧٨٩ و ۰۱۲۳۴۵۶۷۸۹ إلى 0123456789
@@ -29,6 +30,7 @@ const normalizeDigits = (s: string) =>
 const isValidSaudiNID = (v: string) => /^\d{10}$/.test(v);
 
 const REDIRECT_PATH = "/home";
+const API_BASE = "https://haseef.onrender.com";
 
 /* ============================== Component ============================== */
 export default function Login() {
@@ -62,50 +64,42 @@ export default function Login() {
       return;
     }
 
-    //const raw = localStorage.getItem("haseef_user");
-    //if (!raw) {
-    //  setErr("لا يوجد حساب مسجل. الرجاء إنشاء حساب أولاً.");
-    //  return;
-    //}
     setLoading(true);
     try {
-      const res = await fetch("https://haseef.onrender.com/auth/login", {
+      const res = await fetch(`${API_BASE}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ national_id, password }),
       });
 
-      const data = await res.json();
+      const data: ApiLoginResponse = await res.json();
 
-      if (res.ok) {
-        setOk("تم تسجيل الدخول بنجاح.");
-        setTimeout(() => navigate(REDIRECT_PATH), 700);
-      } else {
-        setErr(data.detail || "رقم الهوية أو كلمة المرور غير صحيحة.");
+      if (!res.ok || !("access_token" in data)) {
+        // ❌ فشل — لا تحفظ أي شيء ولا تنقّل المستخدم
+        setErr(
+          (data as { detail?: string }).detail ||
+            "رقم الهوية أو كلمة المرور غير صحيحة."
+        );
+        return;
       }
-    } catch (error) {
+
+      // ✅ نجاح — خزّن التوكن القادم من الباكند
+      const payload: AuthStorage = {
+        token: data.access_token,
+        at: Date.now(),
+      };
+
+      if (remember)
+        localStorage.setItem("haseef_auth", JSON.stringify(payload));
+      else sessionStorage.setItem("haseef_auth", JSON.stringify(payload));
+
+      setOk("تم تسجيل الدخول بنجاح.");
+      navigate(REDIRECT_PATH);
+    } catch {
       setErr("تعذر الاتصال بالخادم.");
     } finally {
       setLoading(false);
     }
-
-    //  const user: StoredUser = JSON.parse(raw);
-    //  if (user.nationalId !== nationalId || user.password !== password) {
-    //    setErr("رقم الهوية أو كلمة المرور غير صحيحة.");
-    //    return;
-    //  } this is commented because now the backend is doing the actual authentication no need for local checks
-
-    setLoading(true);
-    const token = { national_id, at: Date.now() };
-
-    if (remember) localStorage.setItem("haseef_auth", JSON.stringify(token));
-    else sessionStorage.setItem("haseef_auth", JSON.stringify(token));
-
-    setTimeout(() => {
-      setLoading(false);
-      setOk("تم تسجيل الدخول بنجاح.");
-      navigate(REDIRECT_PATH);
-    }, 350);
   };
 
   return (
