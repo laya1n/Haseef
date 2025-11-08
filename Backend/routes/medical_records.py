@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 import pandas as pd
+from datetime import datetime, timedelta
 
 router = APIRouter(prefix="/medical", tags=["Medical Records"])
 
@@ -37,6 +38,10 @@ def load_medical_records():
         "emer_ind",
         "contract",
     ]
+    #cleans spaces and lower cases to improve search
+    for col in df.columns:
+        if df[col].dtype == object:
+            df[col] = df[col].astype(str).str.strip().str.lower()
 
     #this is temp
     df["ai_analysis"] = "No analysis yet — will be added by AI Agent."
@@ -44,6 +49,21 @@ def load_medical_records():
     return df
 
 @router.get("/records")
-def get_medical_records():
+def get_medical_records(
+    doctor: str = Query(None, description="Search by doctor name"),
+    last_week: bool = Query(False, description="Filter by last week"),
+):
     df = load_medical_records()
+
+    # search by doctor name
+    if doctor:
+        doctor = doctor.strip().lower()
+        df = df[df["doctor_name"].str.contains(doctor, na=False)]
+
+    # filter for last week
+    if last_week:
+        df["treatment_date"] = pd.to_datetime(df["treatment_date"], errors="coerce")
+        one_week_ago = datetime.now() - timedelta(days=7)
+        df = df[df["treatment_date"] >= one_week_ago]
+
     return df.fillna("").to_dict(orient="records")
