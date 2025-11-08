@@ -8,3 +8,4 @@ passlib[bcrypt]==1.7.4
 python-multipart
 python-dotenv     # لتحميل متغيرات البيئة من ملف .env
 alembic           # في حال استخدمتم ترحيلات قاعدة البيانات (migrations)
+python-jose[cryptography]

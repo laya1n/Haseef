@@ -4,6 +4,8 @@ from passlib.context import CryptContext
 from Backend.database import SessionLocal
 from Backend.model import User
 from Backend.schema import UserCreate, UserLogin
+from Backend.auth_utils import create_access_token
+
 router = APIRouter(prefix="/auth", tags=["Auth"])
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -38,4 +40,5 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     if not pwd_context.verify(user.password, db_user.password):
         raise HTTPException(status_code=401, detail="Incorrect password")
 
-    return {"message": "Login successful!"}
+    access_token = create_access_token({"sub": db_user.national_id})
+    return {"access_token": access_token, "token_type": "bearer"}
