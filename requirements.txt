@@ -11,3 +11,4 @@ alembic           # في حال استخدمتم ترحيلات قاعدة ال�
 python-jose[cryptography]
 xlrd==1.2.0
 openpyxl
+pandas
