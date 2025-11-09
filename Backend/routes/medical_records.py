@@ -7,7 +7,7 @@ router = APIRouter(prefix="/medical", tags=["Medical Records"])
 # load from excel sheet
 def load_medical_records():
     df = pd.read_excel("Backend/data/medical_records.xlsx", engine="openpyxl")
-
+    df["Treatment Date"] = df["Treatment Date"].astype(str)
     # columns to show
     columns = [
         "Name",
