@@ -9,6 +9,13 @@ from Backend.routes import medical_records, insurance_records, drug_records
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(auth.router)
 app.include_router(medical_records.router)
 app.include_router(insurance_records.router)
@@ -22,11 +29,3 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         status_code=400,
         content={"error": msg}
     )
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
