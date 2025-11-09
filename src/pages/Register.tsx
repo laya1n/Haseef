@@ -17,8 +17,10 @@ const normalizeDigits = (s: string) =>
     .replace(/[٠-٩]/g, (d) => "0123456789"["٠١٢٣٤٥٦٧٨٩".indexOf(d)])
     .replace(/[۰-۹]/g, (d) => "0123456789"["۰۱۲۳۴۵۶۷۸۹".indexOf(d)]);
 
-// يمكن تغييره من .env
-const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
+const isValidNID = (v: string) => /^\d{10}$/.test(v);
+
+// قابل للتغيير من .env (Vite)
+const API_BASE = import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000";
 
 /* ============================== Component ============================== */
 export default function Register() {
@@ -34,13 +36,12 @@ export default function Register() {
   const [err, setErr] = useState("");
   const [ok, setOk] = useState("");
 
-  const isValidNID = (v: string) => /^\d{10}$/.test(v);
-
   const canSubmit = useMemo(
     () =>
       name.trim().length > 0 &&
       isValidNID(national_id) &&
       password.length >= 6 &&
+      !password.includes(" ") &&
       password === confirm &&
       !loading,
     [name, national_id, password, confirm, loading]
@@ -77,20 +78,31 @@ export default function Register() {
     try {
       const res = await fetch(`${API_BASE}/auth/register`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
         body: JSON.stringify(payload),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
 
-      if (res.ok) {
-        setOk("تم إنشاء الحساب بنجاح! سيتم تحويلك لتسجيل الدخول.");
-        setTimeout(() => navigate("/"), 900);
-      } else {
-        setErr(data.detail || "حدث خطأ أثناء التسجيل.");
+      if (!res.ok) {
+        // detail قد تكون string أو array من أخطاء التحقق من Pydantic
+        const msg =
+          typeof data?.detail === "string"
+            ? data.detail
+            : Array.isArray(data?.detail)
+            ? data.detail[0]?.msg || "بيانات غير صالحة."
+            : data?.error || "حدث خطأ أثناء التسجيل.";
+        setErr(msg);
+        return;
       }
-    } catch (error) {
-      setErr("تعذر الاتصال بالخادم. تأكد من أن الخادم يعمل.");
+
+      setOk("تم إنشاء الحساب بنجاح! سيتم تحويلك لتسجيل الدخول.");
+      setTimeout(() => navigate("/"), 900);
+    } catch {
+      setErr("تعذر الاتصال بالخادم. تأكدي من تشغيل الباك-إند.");
     } finally {
       setLoading(false);
     }
@@ -115,7 +127,7 @@ export default function Register() {
           </p>
         </div>
 
-        <form onSubmit={onSubmit} className="space-y-5 text-right">
+        <form onSubmit={onSubmit} className="space-y-5 text-right" noValidate>
           {/* الاسم */}
           <div>
             <label className="text-sm font-medium text-black/70">

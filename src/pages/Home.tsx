@@ -1,15 +1,21 @@
+// src/pages/Home.tsx
 import { Link, useNavigate } from "react-router-dom";
 import { ClipboardList, Shield, Pill, LogOut } from "lucide-react";
-import logo from "@/assets/logo.png"; // ✅ شعار حصيف
+import logo from "@/assets/logo.png";
+import { apiLogout } from "@/lib/api";
 
 export default function Home() {
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    // إزالة بيانات تسجيل الدخول
-    localStorage.removeItem("haseef_auth");
-    sessionStorage.removeItem("haseef_auth");
-    navigate("/");
+  const handleLogout = async () => {
+    try {
+      // ✅ مصادقة بالكوكيز: نحذف جلسة المستخدم من السيرفر
+      await apiLogout();
+    } catch {
+      // حتى لو فشل الطلب، سنعيد التوجيه لصفحة الدخول
+    } finally {
+      navigate("/", { replace: true });
+    }
   };
 
   return (
@@ -65,7 +71,7 @@ export default function Home() {
       {/* البطاقات */}
       <div className="flex flex-col md:flex-row gap-6 justify-center max-w-5xl">
         {/* الأنماط الطبية */}
-        <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-6 w-full md:w-72 shadow-lg hover:translate-y-[-5px] hover:shadow-xl transition">
+        <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-6 w-full md:w-72 shadow-lg hover:-translate-y-1 hover:shadow-xl transition">
           <div className="flex flex-col items-center">
             <ClipboardList className="size-8 text-[#92E3A9] mb-3" />
             <h3 className="text-lg font-semibold text-white mb-1">
@@ -84,7 +90,7 @@ export default function Home() {
         </div>
 
         {/* السجلات التأمينية */}
-        <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-6 w-full md:w-72 shadow-lg hover:translate-y-[-5px] hover:shadow-xl transition">
+        <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-6 w-full md:w-72 shadow-lg hover:-translate-y-1 hover:shadow-xl transition">
           <div className="flex flex-col items-center">
             <Shield className="size-8 text-[#92E3A9] mb-3" />
             <h3 className="text-lg font-semibold text-white mb-1">
@@ -103,7 +109,7 @@ export default function Home() {
         </div>
 
         {/* صرف الأدوية */}
-        <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-6 w-full md:w-72 shadow-lg hover:translate-y-[-5px] hover:shadow-xl transition">
+        <div className="bg-white/10 backdrop-blur-md border border-white/10 rounded-2xl p-6 w-full md:w-72 shadow-lg hover:-translate-y-1 hover:shadow-xl transition">
           <div className="flex flex-col items-center">
             <Pill className="size-8 text-[#92E3A9] mb-3" />
             <h3 className="text-lg font-semibold text-white mb-1">

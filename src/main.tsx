@@ -1,10 +1,9 @@
-// src/main.tsx
+/* src/main.tsx */
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { RouterProvider, createBrowserRouter } from "react-router-dom";
 import "@/styles/globals.css";
 
-// الصفحات
 import Home from "@/pages/Home";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
@@ -22,7 +21,6 @@ const router = createBrowserRouter([
   { path: "/home", element: <Home /> },
   { path: "/", element: <Login /> },
   { path: "/register", element: <Register /> },
-
   {
     path: "/dashboard",
     element: (
@@ -63,16 +61,11 @@ const router = createBrowserRouter([
       </Protected>
     ),
   },
-
-  // 404
   {
     path: "*",
     element: (
       <div style={{ padding: 32, textAlign: "center" }}>
-        الصفحة غير موجودة —{" "}
-        <a href="/" style={{ color: "#0D16D1" }}>
-          العودة للرئيسية
-        </a>
+        الصفحة غير موجودة — <a href="/">العودة</a>
       </div>
     ),
   },

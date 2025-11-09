@@ -1,14 +1,22 @@
+# ⚙️ FastAPI backend
 fastapi
 uvicorn
+
 sqlalchemy
-psycopg2
-bcrypt
-bcrypt==4.0.1
-passlib[bcrypt]==1.7.4
-python-multipart
-python-dotenv     # لتحميل متغيرات البيئة من ملف .env
-alembic           # في حال استخدمتم ترحيلات قاعدة البيانات (migrations)
-python-jose[cryptography]
-xlrd==1.2.0
+psycopg2               # PostgreSQL connector
+alembic                # لإدارة الترحيلات (migrations)
+
+
+passlib[argon2]==1.7.4  # لتشفير كلمات المرور بـ Argon2
+argon2-cffi             # مكتبة Argon2 backend
+python-jose[cryptography]  # لتوليد JWT tokens
+python-dotenv           # لتحميل متغيرات البيئة من .env
+
+
+python-multipart        # لدعم رفع الملفات في FastAPI
+
+
 openpyxl
 pandas
+xlrd==1.2.0
+

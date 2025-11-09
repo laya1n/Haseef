@@ -1,3 +1,4 @@
+# Backend/schema.py
 from pydantic import BaseModel, Field, validator
 
 class UserCreate(BaseModel):
@@ -7,9 +8,7 @@ class UserCreate(BaseModel):
 
     @validator("national_id")
     def validate_national_id(cls, v):
-        if not v.isdigit():
-            raise ValueError("National ID must contain only numbers")
-        if len(v) != 10:
+        if not v.isdigit() or len(v) != 10:
             raise ValueError("National ID must be exactly 10 digits")
         return v
 
@@ -17,14 +16,20 @@ class UserCreate(BaseModel):
     def validate_password(cls, v):
         if " " in v:
             raise ValueError("Password cannot contain spaces")
+        
+        if len(v) > 128:
+            raise ValueError("Password too long (max 128 characters)")
         return v
-    
+
 class UserLogin(BaseModel):
     national_id: str
     password: str
 
     @validator("national_id")
-    def validate_national_id(cls, v):
+    def validate_login_nid(cls, v):
         if not v.isdigit() or len(v) != 10:
             raise ValueError("Invalid National ID format")
         return v
+
+
+

@@ -1,3 +1,4 @@
+# Backend/model.py
 from sqlalchemy import Column, Integer, String, DateTime
 from datetime import datetime
 from Backend.database import Base

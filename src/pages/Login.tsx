@@ -9,18 +9,11 @@ import {
   ArrowLeft,
   CheckCircle2,
 } from "lucide-react";
+import { apiLogin } from "@/lib/api";
 
-/* ============================== Types ============================== */
-type AuthStorage = {
-  token: string;
-  at: number; // timestamp
-};
+/* =============== Types/Utils =============== */
+type ApiLoginResponse = { ok: true } | { detail: string };
 
-type ApiLoginResponse =
-  | { access_token: string; token_type: "bearer" }
-  | { detail: string };
-
-/* ============================== Utils ============================== */
 // يحوّل ٠١٢٣٤٥٦٧٨٩ و ۰۱۲۳۴۵۶۷۸۹ إلى 0123456789
 const normalizeDigits = (s: string) =>
   s
@@ -28,11 +21,9 @@ const normalizeDigits = (s: string) =>
     .replace(/[۰-۹]/g, (d) => "0123456789"["۰۱۲۳۴۵۶۷۸۹".indexOf(d)]);
 
 const isValidSaudiNID = (v: string) => /^\d{10}$/.test(v);
-
 const REDIRECT_PATH = "/home";
-const API_BASE = "https://haseef.onrender.com";
 
-/* ============================== Component ============================== */
+/* =============== Component =============== */
 export default function Login() {
   const navigate = useNavigate();
 
@@ -66,16 +57,14 @@ export default function Login() {
 
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ national_id, password }),
-      });
+      // ✅ المصادقة بالكوكيز: السيرفر سيضع access_token في كوكي HttpOnly
+      const data = (await apiLogin({
+        national_id,
+        password,
+        remember,
+      })) as ApiLoginResponse;
 
-      const data: ApiLoginResponse = await res.json();
-
-      if (!res.ok || !("access_token" in data)) {
-        // ❌ فشل — لا تحفظ أي شيء ولا تنقّل المستخدم
+      if (!("ok" in data)) {
         setErr(
           (data as { detail?: string }).detail ||
             "رقم الهوية أو كلمة المرور غير صحيحة."
@@ -83,20 +72,16 @@ export default function Login() {
         return;
       }
 
-      // ✅ نجاح — خزّن التوكن القادم من الباكند
-      const payload: AuthStorage = {
-        token: data.access_token,
-        at: Date.now(),
-      };
-
-      if (remember)
-        localStorage.setItem("haseef_auth", JSON.stringify(payload));
-      else sessionStorage.setItem("haseef_auth", JSON.stringify(payload));
-
       setOk("تم تسجيل الدخول بنجاح.");
-      navigate(REDIRECT_PATH);
-    } catch {
-      setErr("تعذر الاتصال بالخادم.");
+      navigate(REDIRECT_PATH, { replace: true });
+    } catch (e: any) {
+      // محاولة استخراج رسالة FastAPI عند الرمي بنص JSON
+      try {
+        const parsed = JSON.parse(e.message);
+        setErr(parsed?.detail || "تعذر الاتصال بالخادم.");
+      } catch {
+        setErr(e?.message || "تعذر الاتصال بالخادم.");
+      }
     } finally {
       setLoading(false);
     }
@@ -249,7 +234,8 @@ export default function Login() {
               "جاري الدخول..."
             ) : (
               <>
-                تسجيل الدخول <ArrowLeft className="size-5" />
+                <span>تسجيل الدخول</span>
+                <ArrowLeft className="size-5" />
               </>
             )}
           </button>

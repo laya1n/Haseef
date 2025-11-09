@@ -1,21 +1,25 @@
+# Backend/main.py
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from Backend.database import Base, engine
-from Backend.routes import auth
+from Backend import model
+from Backend.routes import auth, medical_records, insurance_records, drug_records
 from fastapi.responses import JSONResponse
 from fastapi.exceptions import RequestValidationError
-from fastapi.middleware.cors import CORSMiddleware
-from Backend.routes import medical_records, insurance_records, drug_records
 
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI()
+
+# ✅ اسمحي لأصل الفرونت وأرسلي الكوكيز
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 app.include_router(auth.router)
 app.include_router(medical_records.router)
 app.include_router(insurance_records.router)
@@ -25,7 +29,4 @@ app.include_router(drug_records.router)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     first_error = exc.errors()[0]
     msg = first_error.get("msg", "Invalid input data")
-    return JSONResponse(
-        status_code=400,
-        content={"error": msg}
-    )
+    return JSONResponse(status_code=400, content={"error": msg})

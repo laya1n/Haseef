@@ -1,211 +1,94 @@
+/* src/styles/globals.css */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* 🔹 إعداد الخط العام والاتجاه */
+/* ===== الأساس ===== */
 html {
   direction: rtl;
   scroll-behavior: smooth;
 }
-
 body {
-  @apply font-poppins bg-haseef-gradient min-h-screen text-neutral-800 antialiased;
-  text-align: right;
-  margin: 0;
-  padding: 0;
-}
-
-/* 🔹 تحسين النصوص والخطوط */
-body {
+  @apply min-h-screen font-poppins antialiased text-neutral-800 bg-white text-[14px];
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* =============================== */
-/* ✅ إصلاح "العينين" في حقول الباسوورد */
-/* =============================== */
-input[type="password"]::-ms-reveal,
-input[type="password"]::-ms-clear {
-  display: none;
-  width: 0;
-  height: 0;
-}
-input[type="password"] {
-  appearance: none;
-  -webkit-appearance: none;
-  background-image: none; /* يمنع أي أيقونات افتراضية */
-}
-
-/* 🔹 تخصيص أزرار موحدة */
-button {
-  @apply px-4 py-2 rounded-lg transition-all duration-200 font-medium;
-}
-button.primary {
-  @apply bg-green-600 text-white hover:bg-green-700;
-}
-button.secondary {
-  @apply bg-primary text-white hover:bg-secondary;
-}
-
-/* 🔹 الحقول النصية */
-input[type="text"],
-input[type="password"],
-input[type="email"],
-input[type="number"] {
-  @apply w-full border border-gray-300 rounded-md py-2 px-3 text-sm focus:outline-none;
-  /* تركيز باللون الأخضر المتناسق */
-  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
-}
-input[type="text"]:focus,
-input[type="password"]:focus,
-input[type="email"]:focus,
-input[type="number"]:focus {
-  box-shadow: 0 0 0 4px rgba(146, 227, 169, 0.3); /* #92E3A9/30 */
-  border-color: rgba(17, 47, 42, 0.25); /* #112F2A */
-}
-
-/* 🔹 بطاقات الواجهات */
-.card {
-  @apply bg-white/80 backdrop-blur-lg rounded-2xl shadow-soft p-6;
-}
-
-/* 🔹 روابط */
-a {
-  @apply text-primary hover:text-secondary transition-colors;
-}
-
-/* 🔹 عناوين */
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-  @apply font-bold text-gray-900;
-}
-h1 {
-  @apply text-3xl md:text-4xl;
-}
-h2 {
-  @apply text-2xl;
-}
-h3 {
-  @apply text-xl;
-}
-
-/* 🔹 النصوص الثانوية */
-p {
-  @apply text-gray-600 leading-relaxed;
-}
-
-/* 🔹 تخصيص شريط التمرير (Scrollbar) */
-::-webkit-scrollbar {
-  width: 8px;
-}
-::-webkit-scrollbar-thumb {
-  background-color: rgba(13, 22, 209, 0.5);
-  border-radius: 10px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(13, 22, 209, 0.7);
-}
-
-/* =============================== */
-/* 🎨 تدرج الخلفية الأساسي — متناسق مع اللوقو */
-/* كان أزرقًا؛ الآن غامق (بنفسجي→أزرق بنفسجي→أخضر زيتي) مع لمعة خضراء خفيفة */
-/* =============================== */
-.bg-haseef-gradient {
+/* خلفية لوحة السجلات */
+.bg-haseef-surface {
   background: radial-gradient(
-      circle at 20% 20%,
-      rgba(146, 227, 169, 0.1),
+      800px 500px at 15% 8%,
+      rgba(146, 227, 169, 0.15),
       transparent 60%
     ),
-    linear-gradient(135deg, #251e56 0%, #2b2d6b 30%, #184c4b 70%, #1f5e53 100%);
+    linear-gradient(180deg, #f5f7fb 0%, #e9edf5 100%);
 }
 
-/* 🔹 تنسيق مركزي للمحتوى (لصفحات مثل Login / Register) */
-.centered-container {
-  @apply flex items-center justify-center min-h-screen;
-}
-
-/* 🔹 مربع أبيض مخصص للنماذج */
-.form-box {
-  @apply bg-white rounded-2xl shadow-soft w-full max-w-md p-8;
-}
-
-/* ----- Dashboard visual tweaks to match mock exactly ----- */
+/* ظلال */
 .shadow-soft {
-  box-shadow: 0 8px 22px rgba(20, 20, 43, 0.06);
+  box-shadow: 0 10px 24px rgba(2, 6, 23, 0.07);
 }
 .shadow-ai {
-  box-shadow: 0 10px 28px rgba(40, 51, 218, 0.18);
-}
-.shadow-chip {
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.08) inset;
+  box-shadow: 0 12px 30px rgba(13, 22, 209, 0.14);
 }
 
-/* ultra subtle row zebra (لـ bg-black/2.5) */
-.bg-black\/2\.5 {
-  background-color: rgba(0, 0, 0, 0.025);
+/* أزرار */
+button {
+  @apply rounded-full font-semibold transition-all duration-150;
 }
 
-/* thin scrollbar like the shot */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
-}
-*::-webkit-scrollbar {
-  height: 8px;
-  width: 8px;
-}
-*::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.25);
-  border-radius: 8px;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
+/* بطاقات */
+.card {
+  @apply bg-white rounded-2xl shadow-soft p-5;
 }
 
-/* smoother Arabic text rendering */
-html[dir="rtl"],
-[dir="rtl"] {
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
+/* ===== جداول مضغوطة ===== */
+.table-compact thead th {
+  @apply bg-white font-medium text-black/70 border-b border-black/10;
+}
+.table-compact th,
+.table-compact td {
+  @apply px-3 py-2 text-xs;
+}
+.table-compact tbody tr:nth-child(even) {
+  background-color: rgba(0, 0, 0, 0.02);
 }
 
-/* column drop shadow */
-.shadow-col {
-  box-shadow: 0 4px 10px rgba(76, 77, 233, 0.18);
+/* خلايا تُقصّ للنص الطويل */
+.cell-clip {
+  @apply whitespace-nowrap overflow-hidden text-ellipsis;
 }
 
-/* ---- Green dropdowns (تحسين القائمة المنسدلة الخضراء) ---- */
-.select-green {
-  appearance: none;
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  background-color: #0e6b43;
-  color: #fff;
-  border-radius: 1rem; /* rounded-2xl */
-  padding: 0.5rem 2rem; /* py-2 px-8 */
-  height: 2.5rem; /* h-10 */
-  font-weight: 600;
-  outline: none;
-  cursor: pointer;
-  transition: box-shadow 0.2s, filter 0.2s;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+/* ===== الرسم البياني المضغوط ===== */
+.chart-wrap {
+  height: 200px;
+} /* كان كبير: صار 200px */
+.chart-gap {
+  gap: 0.5rem;
+} /* مسافات أصغر بين الأعمدة */
+.chart-bar {
+  width: 14px;
+} /* العرض لكل عمود */
+.chart-tick {
+  @apply text-[10px] text-black/60;
 }
-.select-green:hover {
-  filter: brightness(1.06);
+.chart-val {
+  @apply text-[10px] text-black/70 mb-1;
 }
-.select-green:focus {
-  box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.25);
+
+/* قوائم منسدلة طويلة -> Scroll */
+.dropdown-scroll {
+  max-height: 260px;
+  overflow: auto;
+  border-radius: 12px;
 }
-.select-green::-ms-expand {
-  display: none;
-}
-.select-green option,
-.select-green optgroup {
-  background: #fff !important;
-  color: #111 !important;
-  font-weight: 400;
+
+/* شاشات صغيرة */
+@media (max-width: 640px) {
+  body {
+    font-size: 13px;
+  }
+  .chart-wrap {
+    height: 180px;
+  }
 }
