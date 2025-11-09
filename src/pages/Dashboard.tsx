@@ -20,14 +20,26 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import clsx from "clsx";
 
-/* ============================== أنواع البيانات ============================== */
+/* ============================== أنواع البيانات (مطابقة للباك) ============================== */
 type MedicalRow = {
-  id: number;
-  doctor: string;
-  diagnosis: string;
-  drug: string;
-  date: string; // ISO
-  note: string;
+  doctor_name: string;
+  patient_name: string;
+  treatment_date: string; // ممكن تكون نص؛ الباك يحولها datetime ثم يرجعها في الدكت
+  ICD10CODE: string;
+  chief_complaint: string;
+  significant_signs: string;
+  claim_type: string;
+  refer_ind: string;
+  emer_ind: string;
+  contract: string;
+  ai_analysis?: string;
+};
+
+type RecordsResponse = {
+  total_records: number;
+  total_doctors: number;
+  alerts_count: number;
+  records: MedicalRow[];
 };
 
 type AiInsight = {
@@ -36,10 +48,8 @@ type AiInsight = {
 };
 
 /* ============================== إعدادات API ============================== */
-/** ملاحظة: وحّد اسم المتغير في المشروع كله (هنا: VITE_API_BASE_URL) */
 const RAW_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
-/** تنظيف المسار حتى لا نحصل على // مزدوج */
 function joinUrl(base: string, path: string) {
   if (!base) return path;
   const b = base.endsWith("/") ? base.slice(0, -1) : base;
@@ -88,13 +98,6 @@ const brand = {
 
 /* خيارات الفلاتر */
 const dates = ["الكل", "الأسبوع الأخير"];
-const patternTypes = [
-  "الكل",
-  "تكرار التشخيص",
-  "تكرار الوصفة",
-  "صرف غير مناسب",
-  "طبيعي",
-];
 
 /* ====================================================================== */
 export default function Dashboard() {
@@ -103,7 +106,6 @@ export default function Dashboard() {
   // فلاتر
   const [selDate, setSelDate] = useState<string>("الكل");
   const [selDoctor, setSelDoctor] = useState<string>("الكل");
-  const [selPattern, setSelPattern] = useState<string>("الكل");
   const [q, setQ] = useState<string>("");
 
   // بيانات
@@ -128,17 +130,21 @@ export default function Dashboard() {
         setError(null);
         setAi(null);
 
-        const data = await httpGet<{ items: MedicalRow[] }>(ENDPOINTS.records, {
-          dateRange: selDate === "الأسبوع الأخير" ? "last_week" : "all",
-          doctor: selDoctor,
-          pattern: selPattern,
-          q: q.trim(),
-        });
+        const params: Record<string, string> = {};
+        if (selDate === "الأسبوع الأخير") params["last_week"] = "true";
+        if (selDoctor !== "الكل") params["doctor"] = selDoctor;
+
+        const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
 
         if (cancel) return;
-        const items = data.items || [];
+        const items = data.records || [];
         setRows(items);
-        setDoctors(Array.from(new Set(items.map((r) => r.doctor))));
+
+        // قائمة الأطباء من الحقل doctor_name
+        const unique = Array.from(
+          new Set(items.map((r) => r.doctor_name).filter(Boolean))
+        );
+        setDoctors(unique);
       } catch (e: any) {
         if (!cancel) setError(e?.message || "فشل تحميل البيانات");
       } finally {
@@ -150,7 +156,7 @@ export default function Dashboard() {
     return () => {
       cancel = true;
     };
-  }, [selDate, selDoctor, selPattern, q]);
+  }, [selDate, selDoctor]);
 
   /* --------------------------- تصفية محلية --------------------------- */
   const filtered = useMemo(() => {
@@ -158,11 +164,16 @@ export default function Dashboard() {
     const s = q.trim();
     return rows.filter(
       (r) =>
-        r.doctor.includes(s) ||
-        r.diagnosis.includes(s) ||
-        r.drug.includes(s) ||
-        r.note.includes(s) ||
-        r.date.includes(s)
+        r.doctor_name?.includes(s) ||
+        r.patient_name?.includes(s) ||
+        r.ICD10CODE?.includes(s) ||
+        r.chief_complaint?.includes(s) ||
+        r.significant_signs?.includes(s) ||
+        r.claim_type?.includes(s) ||
+        r.refer_ind?.includes(s) ||
+        r.emer_ind?.includes(s) ||
+        r.contract?.includes(s) ||
+        r.treatment_date?.includes(s)
     );
   }, [rows, q]);
 
@@ -170,7 +181,7 @@ export default function Dashboard() {
   const chartData = useMemo(() => {
     const by: Record<string, number> = {};
     doctors.forEach((d) => (by[d] = 0));
-    filtered.forEach((r) => (by[r.doctor] = (by[r.doctor] ?? 0) + 1));
+    filtered.forEach((r) => (by[r.doctor_name] = (by[r.doctor_name] ?? 0) + 1));
     return doctors.map((d) => ({ label: d, value: by[d] ?? 0 }));
   }, [filtered, doctors]);
 
@@ -188,7 +199,7 @@ export default function Dashboard() {
         filters: {
           dateRange: selDate === "الأسبوع الأخير" ? "last_week" : "all",
           doctor: selDoctor,
-          pattern: selPattern,
+          // يمكن لاحقًا إضافة مزيد من الفلاتر إذا أصبحت مدعومة من الباك
           q: q.trim(),
         },
         context: filtered,
@@ -300,19 +311,13 @@ export default function Dashboard() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50 focus:ring-4 focus:ring-emerald-300/30"
-                placeholder="ابحث..."
+                placeholder="ابحث باسم الطبيب، المريض، ICD10، أو غيرها…"
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/50" />
             </div>
 
             {/* الفلاتر */}
             <div className="flex items-end gap-2">
-              <Dropdown
-                label="نوع النمط"
-                value={selPattern}
-                onChange={setSelPattern}
-                options={patternTypes}
-              />
               <Dropdown
                 label="الطبيب"
                 value={selDoctor}
@@ -340,7 +345,7 @@ export default function Dashboard() {
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4 md:max-w-[760px]">
             <StatPill
               title="عدد السجلات"
-              value={rows.length}
+              value={filtered.length}
               bg="#D9DBFF"
               text={brand.secondary}
             />
@@ -363,7 +368,7 @@ export default function Dashboard() {
             {/* بطاقة التحليل */}
             <div className="rounded-2xl shadow-ai overflow-hidden h-full">
               <div
-                className="h-full min-h-[260px] p-6 text-white flex flex-col justify-between"
+                className="h-full min-h=[260px] p-6 text-white flex flex-col justify-between"
                 style={{
                   background:
                     "linear-gradient(135deg, #2B2D6B 0%, #4C4DE9 42%, #0D16D1 100%)",
@@ -395,7 +400,7 @@ export default function Dashboard() {
                     <p className="text-white/95 text-center">{ai.message}</p>
                   ) : (
                     <p className="text-white/90 text-center">
-                      اضغطي «تشغيل» لتحليل أنماط التكرار وفق الفلاتر الحالية.
+                      اضغطي «تشغيل» لتحليل أنماط السجلات وفق الفلاتر الحالية.
                     </p>
                   )}
                 </div>
@@ -405,7 +410,9 @@ export default function Dashboard() {
             {/* الرسم البسيط */}
             <Card className="shadow-soft">
               <CardHeader className="pb-0">
-                <CardTitle className="text-base">نسبة التكرار</CardTitle>
+                <CardTitle className="text-base">
+                  عدد السجلات لكل طبيب
+                </CardTitle>
               </CardHeader>
               <CardContent className="pt-2">
                 <div className="h-[260px] rounded-xl border border-black/10 bg-white overflow-hidden">
@@ -457,42 +464,34 @@ export default function Dashboard() {
                 <table className="w-full table-fixed" dir="rtl">
                   <thead>
                     <tr className="text-right text-black/70 text-sm">
-                      <Th w="80px">رقم السجل</Th>
-                      <Th w="120px">الطبيب</Th>
-                      <Th w="140px">التشخيص</Th>
-                      <Th w="160px">الدواء</Th>
-                      <Th w="140px">التاريخ</Th>
-                      <Th>ملاحظة</Th>
+                      <Th w="80px">#</Th>
+                      <Th w="140px">اسم الطبيب</Th>
+                      <Th w="160px">اسم المريض</Th>
+                      <Th w="140px">تاريخ العلاج</Th>
+                      <Th w="120px">رمز ICD10</Th>
+                      <Th w="200px">الشكوى الرئيسية</Th>
+                      <Th w="200px">الأعراض/العلامات</Th>
+                      <Th w="120px">نوع المطالبة</Th>
+                      <Th w="110px">إحالة</Th>
+                      <Th w="110px">طوارئ</Th>
+                      <Th w="120px">العقد</Th>
                     </tr>
                   </thead>
                   <tbody className="text-sm">
                     {loading ? (
                       Array.from({ length: 5 }).map((_, i) => (
                         <tr key={i} className="border-t border-black/5">
-                          <Td>
-                            <div className="h-4 bg-black/10 rounded animate-pulse" />
-                          </Td>
-                          <Td>
-                            <div className="h-4 bg-black/10 rounded animate-pulse" />
-                          </Td>
-                          <Td>
-                            <div className="h-4 bg-black/10 rounded animate-pulse" />
-                          </Td>
-                          <Td>
-                            <div className="h-4 bg-black/10 rounded animate-pulse" />
-                          </Td>
-                          <Td>
-                            <div className="h-4 bg-black/10 rounded animate-pulse" />
-                          </Td>
-                          <Td>
-                            <div className="h-4 bg-black/10 rounded animate-pulse" />
-                          </Td>
+                          {Array.from({ length: 11 }).map((__, j) => (
+                            <Td key={j}>
+                              <div className="h-4 bg-black/10 rounded animate-pulse" />
+                            </Td>
+                          ))}
                         </tr>
                       ))
                     ) : filtered.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={11}
                           className="px-4 py-8 text-center text-black/60"
                         >
                           لا توجد سجلات للعرض.
@@ -501,19 +500,27 @@ export default function Dashboard() {
                     ) : (
                       filtered.map((r, i) => (
                         <tr
-                          key={r.id}
+                          key={`${r.doctor_name}-${r.patient_name}-${i}`}
                           className={clsx(
                             "border-t border-black/5",
-                            // استخدمنا قيمة مخصصة مدعومة من Tailwind:
                             i % 2 === 1 && "bg-black/[0.025]"
                           )}
                         >
-                          <Td>{r.id}</Td>
-                          <Td>{r.doctor}</Td>
-                          <Td>{r.diagnosis}</Td>
-                          <Td>{r.drug}</Td>
-                          <Td>{r.date}</Td>
-                          <Td className="truncate">{r.note}</Td>
+                          <Td>{i + 1}</Td>
+                          <Td>{r.doctor_name}</Td>
+                          <Td>{r.patient_name}</Td>
+                          <Td>{r.treatment_date}</Td>
+                          <Td>{r.ICD10CODE}</Td>
+                          <Td className="truncate" title={r.chief_complaint}>
+                            {r.chief_complaint}
+                          </Td>
+                          <Td className="truncate" title={r.significant_signs}>
+                            {r.significant_signs}
+                          </Td>
+                          <Td>{r.claim_type}</Td>
+                          <Td>{r.refer_ind}</Td>
+                          <Td>{r.emer_ind}</Td>
+                          <Td>{r.contract}</Td>
                         </tr>
                       ))
                     )}
@@ -530,7 +537,6 @@ export default function Dashboard() {
 
 /* ============================== مكوّنات فرعية ============================== */
 
-// عنصر القائمة الجانبية (نسخة واحدة فقط داخل نفس الملف)
 function SideItem({
   icon,
   label,

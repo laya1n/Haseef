@@ -3,9 +3,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import logo from "@/assets/logo2.png";
 import {
-  Bell,
-  UserRound,
-  Bot,
   Plus,
   Shield,
   Pill,
@@ -16,42 +13,54 @@ import {
   Loader2,
   TriangleAlert,
   Home,
+  Bot,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import clsx from "clsx";
 
-/* ============================== Types ============================== */
-type RxRow = {
-  id: number;
-  doctor: string;
-  diagnosis: string;
-  drug: string;
-  date: string;
-  note: string;
+/* ============================== Types (match backend) ============================== */
+type DrugRow = {
+  doctor_name: string;
+  patient_name: string;
+  service_code: string;
+  service_description: string;
+  quantity: number | string;
+  item_unit_price: number | string;
+  gross_amount: number | string;
+  vat_amount: number | string;
+  discount: number | string;
+  net_amount: number | string;
+  date: string; // ISO-ish text
+  ai_analysis?: string;
 };
 
-type DonutSlice = {
-  label: string;
-  value: number; // 0..100 (المجموع ~100)
-  color?: string;
+type RecordsResponse = {
+  total_operations: number;
+  top_drug: string;
+  alerts_count: number;
+  records: DrugRow[];
 };
 
-type ListResponse = { items: RxRow[]; doctors?: string[]; drugs?: string[] };
-type DonutResponse = { distribution: DonutSlice[] };
-type AiInsight = { message: string; sourceTag?: string };
+type AiInsight = { message: string; meta?: Record<string, unknown> };
 
 /* ============================== API config ============================== */
-// ضعي الدومين في .env لو كان خارجيًا: VITE_API_BASE_URL=https://api.example.com
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const RAW_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
+function joinUrl(base: string, path: string) {
+  if (!base) return path;
+  const b = base.endsWith("/") ? base.slice(0, -1) : base;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${b}${p}`;
+}
 
 const ENDPOINTS = {
-  list: "/api/drugs/list",
-  donut: "/api/drugs/distribution",
-  analyze: "/api/ai/drugs/analyze",
+  records: "/api/drugs/records",
+  analyze: "/api/ai/analyze",
 };
 
 async function httpGet<T>(path: string, params?: Record<string, string>) {
-  const url = new URL(BASE_URL + path || path, window.location.origin);
+  const full = joinUrl(RAW_BASE_URL, path);
+  const url = new URL(full, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
       if (v && v !== "الكل") url.searchParams.set(k, v);
@@ -62,7 +71,8 @@ async function httpGet<T>(path: string, params?: Record<string, string>) {
   return (await res.json()) as T;
 }
 async function httpPost<T>(path: string, body: unknown) {
-  const res = await fetch(BASE_URL + path || path, {
+  const full = joinUrl(RAW_BASE_URL, path);
+  const res = await fetch(full, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -85,19 +95,18 @@ export default function Drugs() {
   const navigate = useNavigate();
 
   // بيانات
-  const [rows, setRows] = useState<RxRow[]>([]);
-  const [donut, setDonut] = useState<DonutSlice[]>([]);
+  const [rows, setRows] = useState<DrugRow[]>([]);
+  const [totalOps, setTotalOps] = useState<number>(0);
+  const [topDrug, setTopDrug] = useState<string>("—");
   const [doctors, setDoctors] = useState<string[]>([]);
   const [drugs, setDrugs] = useState<string[]>([]);
 
   // واجهة
   const [loading, setLoading] = useState(false);
-  const [loadingDonut, setLoadingDonut] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // AI
   const [aiMsg, setAiMsg] = useState<string | null>(null);
-  const [aiSource, setAiSource] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
   // فلاتر/بحث
@@ -106,35 +115,37 @@ export default function Drugs() {
   const [selDrug, setSelDrug] = useState<string>("الكل");
   const [q, setQ] = useState("");
 
-  /* ---------- تحميل السجلات ---------- */
+  /* ---------- تحميل السجلات من /api/drugs/records ---------- */
   useEffect(() => {
     let cancel = false;
     (async () => {
       try {
         setError(null);
         setLoading(true);
-        setAiMsg(null); // اتساق مع بقية الصفحات
-        const data = await httpGet<ListResponse>(ENDPOINTS.list, {
-          dateRange: selDate === "الأسبوع الأخير" ? "last_week" : "all",
-          doctor: selDoctor,
-          drug: selDrug,
-          q: q.trim(),
-        });
+        setAiMsg(null);
+
+        const params: Record<string, string> = {};
+        if (selDate === "الأسبوع الأخير") params["last_week"] = "true";
+        // مبدئيًا الباك لا يدعم doctor أو drug كـ params؛ نعتمد تصفية محلية
+        const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
         if (cancel) return;
-        const items = data.items ?? [];
-        setRows(items);
+
+        const list = data.records ?? [];
+        setRows(list);
+        setTotalOps(data.total_operations ?? list.length);
+        setTopDrug(data.top_drug || "—");
+
+        // استخراج خيارات الأطباء والأدوية من الداتا
         setDoctors(
-          data.doctors?.length
-            ? data.doctors
-            : Array.from(new Set(items.map((r) => r.doctor))).filter(Boolean)
+          Array.from(new Set(list.map((r) => r.doctor_name).filter(Boolean)))
         );
         setDrugs(
-          data.drugs?.length
-            ? data.drugs
-            : Array.from(new Set(items.map((r) => r.drug))).filter(Boolean)
+          Array.from(
+            new Set(list.map((r) => r.service_description).filter(Boolean))
+          )
         );
       } catch (e: any) {
-        if (!cancel) setError(e?.message || "فشل تحميل سجلات الصرف.");
+        if (!cancel) setError(e?.message || "فشل تحميل سجلات الأدوية.");
       } finally {
         if (!cancel) setLoading(false);
       }
@@ -142,69 +153,71 @@ export default function Drugs() {
     return () => {
       cancel = true;
     };
-  }, [selDate, selDoctor, selDrug, q]);
+  }, [selDate]);
 
-  /* ---------- تحميل توزيع الدونات ---------- */
-  useEffect(() => {
-    let cancel = false;
-    (async () => {
-      try {
-        setLoadingDonut(true);
-        const d = await httpGet<DonutResponse>(ENDPOINTS.donut, {
-          dateRange: selDate === "الأسبوع الأخير" ? "last_week" : "all",
-          doctor: selDoctor,
-          drug: selDrug,
-          q: q.trim(),
-        });
-        if (cancel) return;
-        const palette = [
-          "#3853FF",
-          "#6FE38A",
-          "#A7F3A8",
-          "#E6ECFF",
-          "#9AA0FF",
-          "#B9E4C9",
-        ];
-        const cleaned =
-          d.distribution?.map((s, i) => ({
-            ...s,
-            color: s.color ?? palette[i % palette.length],
-          })) ?? [];
-        setDonut(cleaned);
-      } catch {
-        // يكفي تجاهل الخطأ في المخطط
-      } finally {
-        if (!cancel) setLoadingDonut(false);
-      }
-    })();
-    return () => {
-      cancel = true;
-    };
-  }, [selDate, selDoctor, selDrug, q]);
-
-  /* ---------- تصفية محلية ---------- */
+  /* ---------- تصفية محلية (doctor_name / service_description) + البحث ---------- */
   const filtered = useMemo(() => {
-    if (!q.trim()) return rows;
-    const s = q.trim();
-    return rows.filter(
-      (r) =>
-        r.doctor?.includes(s) ||
-        r.diagnosis?.includes(s) ||
-        r.drug?.includes(s) ||
-        r.note?.includes(s) ||
-        r.date?.includes(s)
-    );
-  }, [rows, q]);
+    let out = rows;
+    if (selDoctor !== "الكل") {
+      out = out.filter((r) => r.doctor_name === selDoctor);
+    }
+    if (selDrug !== "الكل") {
+      out = out.filter((r) => r.service_description === selDrug);
+    }
+    if (q.trim()) {
+      const s = q.trim();
+      out = out.filter((r) => {
+        const vals = [
+          r.doctor_name,
+          r.patient_name,
+          r.service_code,
+          r.service_description,
+          r.quantity,
+          r.item_unit_price,
+          r.gross_amount,
+          r.vat_amount,
+          r.discount,
+          r.net_amount,
+          r.date,
+        ]
+          .filter((v) => v !== undefined && v !== null)
+          .map((v) => String(v));
+        return vals.some((v) => v.includes(s));
+      });
+    }
+    return out;
+  }, [rows, selDoctor, selDrug, q]);
 
-  /* ---------- أعلى دواء ---------- */
-  const topDrug = useMemo(() => {
-    if (!donut?.length) return "—";
-    return donut.reduce((a, b) => (a.value >= b.value ? a : b)).label;
-  }, [donut]);
+  /* ---------- حساب توزيع دونات محليًا (حسب service_description) ---------- */
+  type DonutSlice = { label: string; value: number; color?: string };
+  const donut = useMemo<DonutSlice[]>(() => {
+    if (!filtered.length) return [];
+    const counts = new Map<string, number>();
+    filtered.forEach((r) => {
+      const key = r.service_description || "-";
+      counts.set(key, (counts.get(key) ?? 0) + 1);
+    });
+    const total = Array.from(counts.values()).reduce((a, b) => a + b, 0) || 1;
+    const palette = [
+      "#3853FF",
+      "#6FE38A",
+      "#A7F3A8",
+      "#E6ECFF",
+      "#9AA0FF",
+      "#B9E4C9",
+    ];
+    return Array.from(counts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([label, c], i) => ({
+        label,
+        value: Math.round((c / total) * 100),
+        color: palette[i % palette.length],
+      }));
+  }, [filtered]);
 
-  /* ---------- conic-gradient ---------- */
   const donutBg = useMemo(() => {
-    if (!donut?.length) return "conic-gradient(#E6ECFF 0deg 360deg)";
+    if (!donut.length) return "conic-gradient(#E6ECFF 0deg 360deg)";
     let start = 0;
     const parts = donut.map((s) => {
       const end = start + s.value * 3.6;
@@ -215,11 +228,18 @@ export default function Drugs() {
     return `conic-gradient(${parts.join(",")})`;
   }, [donut]);
 
+  /* ---------- أعلى دواء من الدونات (fallback لو رجع الباك ‘-’) ---------- */
+  const topDrugLocal = useMemo(() => {
+    if (topDrug && topDrug !== "-") return topDrug;
+    if (!donut.length) return "—";
+    return donut.reduce((a, b) => (a.value >= b.value ? a : b)).label;
+  }, [topDrug, donut]);
+
+  /* ---------- AI ---------- */
   async function runAi() {
     try {
       setAiLoading(true);
       setAiMsg(null);
-      setAiSource(null);
       const res = await httpPost<AiInsight>(ENDPOINTS.analyze, {
         filters: {
           dateRange: selDate === "الأسبوع الأخير" ? "last_week" : "all",
@@ -227,10 +247,10 @@ export default function Drugs() {
           drug: selDrug,
           q: q.trim(),
         },
+        context: filtered,
       });
       setAiMsg(res.message || "تم التحليل.");
-      if (res.sourceTag) setAiSource(res.sourceTag);
-    } catch {
+    } catch (e: any) {
       setAiMsg("تعذّر تشغيل التحليل الآن. تحقّقي من خدمة الذكاء الاصطناعي.");
     } finally {
       setAiLoading(false);
@@ -248,7 +268,7 @@ export default function Drugs() {
       <div className="grid grid-cols-[280px_1fr]">
         {/* Sidebar */}
         <aside className="min-h-screen border-l bg-white sticky top-0 relative flex flex-col justify-between">
-          {/* الشعار في الزاوية العلوية اليمنى */}
+          {/* الشعار */}
           <div className="absolute top-4 right-4">
             <img
               src={logo}
@@ -256,6 +276,7 @@ export default function Drugs() {
               className="w-10 md:w-12 drop-shadow-sm select-none"
             />
           </div>
+
           <div className="p-6 pt-20 space-y-4 flex-1">
             <nav className="px-4 space-y-2">
               <SideItem
@@ -265,7 +286,7 @@ export default function Drugs() {
               />
               <SideItem
                 icon={<Shield className="size-4" />}
-                label="السجلات التأمنية"
+                label="السجلات التأمينية"
                 onClick={() => navigate("/insurance")}
               />
               <SideItem
@@ -303,7 +324,7 @@ export default function Drugs() {
 
         {/* Main */}
         <main className="p-6 md:p-8 relative" dir="rtl">
-          {/* زر العودة للهوم (منزل فقط) */}
+          {/* زر العودة للهوم */}
           <button
             onClick={() => navigate("/home")}
             className="absolute top-4 right-4 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition"
@@ -327,14 +348,14 @@ export default function Drugs() {
             <div className="relative w-[320px] max-w-[45vw]">
               <input
                 className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50 focus:ring-4 focus:ring-emerald-300/30"
-                placeholder="ابحث..."
+                placeholder="ابحث باسم الطبيب/المريض/الدواء/الكود/التاريخ…"
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/50" />
             </div>
 
-            {/* Filters (Dropdown مخصّص) */}
+            {/* Filters */}
             <div className="flex items-end gap-2">
               <Dropdown
                 label="الدواء"
@@ -348,7 +369,6 @@ export default function Drugs() {
                 onChange={setSelDoctor}
                 options={["الكل", ...doctors]}
               />
-
               <Dropdown
                 label="التاريخ"
                 value={selDate}
@@ -370,13 +390,13 @@ export default function Drugs() {
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4 md:max-w-[760px]">
             <StatPill
               title="عدد العمليات"
-              value={filtered.length}
+              value={filtered.length || totalOps}
               bg="#D9DBFF"
               text={brand.secondary}
             />
             <StatPill
               title="الدواء الأعلى صرفًا"
-              value={topDrug}
+              value={topDrugLocal}
               bg="#CDEFE3"
               text="#1B4D3B"
             />
@@ -422,14 +442,7 @@ export default function Drugs() {
 
                 <div className="mt-6 flex-1 flex items-center justify-center leading-relaxed">
                   {aiMsg ? (
-                    <div className="text-center">
-                      <p className="text-white/95">{aiMsg}</p>
-                      {aiSource && (
-                        <p className="text-white/70 text-sm mt-2">
-                          المصدر: {aiSource}
-                        </p>
-                      )}
-                    </div>
+                    <p className="text-white/95 text-center">{aiMsg}</p>
                   ) : (
                     <p className="text-white/90 text-center">
                       اضغطي «تشغيل» لتحليل أنماط صرف الأدوية وفق الفلاتر
@@ -443,13 +456,15 @@ export default function Drugs() {
             {/* Donut */}
             <Card className="shadow-soft">
               <CardHeader className="pb-0">
-                <CardTitle className="text-base">نسبة الصرف</CardTitle>
+                <CardTitle className="text-base">
+                  نسبة الصرف حسب الدواء
+                </CardTitle>
               </CardHeader>
               <CardContent className="pt-3">
                 <div className="grid grid-cols-[1fr_1fr] items-center gap-4">
                   {/* legend */}
                   <ul className="space-y-2">
-                    {(donut?.slice(0, 4) ?? []).map((s) => (
+                    {(donut.slice(0, 5) ?? []).map((s) => (
                       <li
                         key={s.label}
                         className="flex items-center gap-2 text-sm text-black/80"
@@ -461,12 +476,7 @@ export default function Drugs() {
                         {s.label} {s.value}%
                       </li>
                     ))}
-                    {loadingDonut && (
-                      <li className="text-sm text-black/50">
-                        جارِ تحميل التوزيع…
-                      </li>
-                    )}
-                    {!loadingDonut && donut.length === 0 && (
+                    {!donut.length && (
                       <li className="text-sm text-black/50">
                         لا يوجد توزيع متاح.
                       </li>
@@ -495,19 +505,24 @@ export default function Drugs() {
                 <table className="w-full table-fixed" dir="rtl">
                   <thead>
                     <tr className="text-right text-black/70 text-sm">
-                      <Th w="110px">رقم السجل</Th>
                       <Th w="140px">الطبيب</Th>
-                      <Th w="160px">التشخيص</Th>
-                      <Th w="160px">الدواء</Th>
+                      <Th w="160px">المريض</Th>
+                      <Th w="120px">كود الخدمة</Th>
+                      <Th w="220px">وصف الخدمة/الدواء</Th>
+                      <Th w="90px">الكمية</Th>
+                      <Th w="120px">سعر الوحدة</Th>
+                      <Th w="120px">الإجمالي</Th>
+                      <Th w="110px">الضريبة</Th>
+                      <Th w="110px">الخصم</Th>
+                      <Th w="130px">الصافي</Th>
                       <Th w="140px">التاريخ</Th>
-                      <Th>ملاحظة</Th>
                     </tr>
                   </thead>
                   <tbody className="text-sm">
                     {loading ? (
                       Array.from({ length: 6 }).map((_, i) => (
                         <tr key={i} className="border-t border-black/5">
-                          {Array.from({ length: 6 }).map((__, j) => (
+                          {Array.from({ length: 11 }).map((__, j) => (
                             <Td key={j}>
                               <div className="h-4 bg-black/10 rounded animate-pulse" />
                             </Td>
@@ -517,7 +532,7 @@ export default function Drugs() {
                     ) : filtered.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={6}
+                          colSpan={11}
                           className="px-4 py-8 text-center text-black/60"
                         >
                           لا توجد سجلات مطابقة.
@@ -526,18 +541,28 @@ export default function Drugs() {
                     ) : (
                       filtered.map((r, i) => (
                         <tr
-                          key={r.id}
+                          key={`${r.doctor_name}-${r.patient_name}-${r.service_code}-${i}`}
                           className={clsx(
                             "border-t border-black/5",
-                            i % 2 === 1 && "bg-black/2.5"
+                            i % 2 === 1 && "bg-black/[0.025]"
                           )}
                         >
-                          <Td w="110px">{r.id}</Td>
-                          <Td w="140px">{r.doctor}</Td>
-                          <Td w="160px">{r.diagnosis}</Td>
-                          <Td w="160px">{r.drug}</Td>
-                          <Td w="140px">{r.date}</Td>
-                          <Td className="truncate">{r.note}</Td>
+                          <Td>{r.doctor_name}</Td>
+                          <Td>{r.patient_name}</Td>
+                          <Td>{r.service_code}</Td>
+                          <Td
+                            className="truncate"
+                            title={r.service_description}
+                          >
+                            {r.service_description}
+                          </Td>
+                          <Td>{r.quantity}</Td>
+                          <Td>{r.item_unit_price}</Td>
+                          <Td>{r.gross_amount}</Td>
+                          <Td>{r.vat_amount}</Td>
+                          <Td>{r.discount}</Td>
+                          <Td>{r.net_amount}</Td>
+                          <Td>{r.date}</Td>
                         </tr>
                       ))
                     )}
@@ -579,7 +604,7 @@ function SideItem({
   );
 }
 
-/** Dropdown مخصص (بديل select) */
+/** Dropdown مخصص */
 function Dropdown({
   label,
   value,
@@ -672,6 +697,7 @@ function StatPill({
     </div>
   );
 }
+
 function Th({ children, w }: { children: React.ReactNode; w?: string }) {
   return (
     <th
@@ -682,6 +708,7 @@ function Th({ children, w }: { children: React.ReactNode; w?: string }) {
     </th>
   );
 }
+
 function Td({
   children,
   w,

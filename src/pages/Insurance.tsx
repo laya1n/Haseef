@@ -3,9 +3,6 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import logo from "@/assets/logo2.png";
 import {
-  Bell,
-  UserRound,
-  Bot,
   Plus,
   Shield,
   Pill,
@@ -16,21 +13,35 @@ import {
   Loader2,
   TriangleAlert,
   Home,
+  Bot,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import clsx from "clsx";
 
-/* ============================== أنواع البيانات ============================== */
-type Claim = {
-  id: number;
-  patient: string;
-  insurer: string;
-  diagnosis: string;
-  action: string;
-  status: "مرفوض" | "غير واضح" | "مقبول" | "يحتاج مراجعة";
-  manager: string;
-  note: string;
-  date?: string;
+/* ============================== أنواع البيانات (مطابقة للباك) ============================== */
+type InsuranceRow = {
+  inv_no: string;
+  contract: string;
+  claim_type: string;
+  gross_amount_no_vat: string | number;
+  vat_amount: string | number;
+  discount: string | number;
+  deductible: string | number;
+  special_discount: string | number;
+  net_amount: string | number;
+  pay_to: string;
+  refer_ind: string;
+  emer_ind: string;
+  incur_date_from: string; // نص تاريخ
+  incur_date_to: string; // نص تاريخ
+  ai_analysis?: string;
+};
+
+type RecordsResponse = {
+  total_claims: number;
+  total_companies: number;
+  alerts_count: number;
+  records: InsuranceRow[];
 };
 
 type AiInsight = {
@@ -39,18 +50,24 @@ type AiInsight = {
 };
 
 /* ============================== إعدادات API ============================== */
-// ضعي قيمة الدومين في بيئة Vite: VITE_API_BASE_URL=https://your-api.example.com
-const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const RAW_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+
+function joinUrl(base: string, path: string) {
+  if (!base) return path;
+  const b = base.endsWith("/") ? base.slice(0, -1) : base;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${b}${p}`;
+}
 
 const ENDPOINTS = {
-  claims: "/api/insurance/claims",
-  analyze: "/api/ai/insurance/analyze",
+  records: "/api/insurance/records",
+  analyze: "/api/ai/analyze",
 };
 
 /* ============================== أدوات مساعدة ============================== */
 async function httpGet<T>(path: string, params?: Record<string, string>) {
-  // نضمن عنوانًا مطلقًا بتمرير origin
-  const url = new URL(BASE_URL + path || path, window.location.origin);
+  const full = joinUrl(RAW_BASE_URL, path);
+  const url = new URL(full, window.location.origin);
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
       if (v !== "" && v !== "الكل") url.searchParams.set(k, v);
@@ -62,7 +79,8 @@ async function httpGet<T>(path: string, params?: Record<string, string>) {
 }
 
 async function httpPost<T>(path: string, body: unknown) {
-  const res = await fetch(BASE_URL + path || path, {
+  const full = joinUrl(RAW_BASE_URL, path);
+  const res = await fetch(full, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -73,7 +91,6 @@ async function httpPost<T>(path: string, body: unknown) {
 }
 
 /* ============================== ثابتات الواجهة ============================== */
-const statuses = ["الكل", "مرفوض", "غير واضح", "مقبول", "يحتاج مراجعة"];
 const dates = ["الكل", "الأسبوع الأخير"];
 
 const brand = {
@@ -89,13 +106,13 @@ export default function Insurance() {
 
   // فلاتر + بحث
   const [selDate, setSelDate] = useState<string>("الكل");
-  const [selStatus, setSelStatus] = useState<string>("الكل");
-  const [selInsurer, setSelInsurer] = useState<string>("الكل");
+  const [selCompany, setSelCompany] = useState<string>("الكل");
   const [q, setQ] = useState<string>("");
 
-  // بيانات قادمة من الخادم
-  const [claims, setClaims] = useState<Claim[]>([]);
-  const [insurers, setInsurers] = useState<string[]>([]);
+  // بيانات
+  const [rows, setRows] = useState<InsuranceRow[]>([]);
+  const [companies, setCompanies] = useState<string[]>([]);
+  const [totalClaims, setTotalClaims] = useState<number>(0);
 
   // حالات
   const [loading, setLoading] = useState<boolean>(false);
@@ -115,26 +132,22 @@ export default function Insurance() {
         setError(null);
         setAi(null);
 
-        // يفضّل أن يرجع الخادم { items: Claim[], insurers?: string[] }
-        const data = await httpGet<{ items: Claim[]; insurers?: string[] }>(
-          ENDPOINTS.claims,
-          {
-            dateRange: selDate === "الأسبوع الأخير" ? "last_week" : "all",
-            status: selStatus,
-            insurer: selInsurer,
-            q: q.trim(),
-          }
-        );
+        const params: Record<string, string> = {};
+        if (selDate === "الأسبوع الأخير") params["last_week"] = "true";
+        if (selCompany !== "الكل") params["company"] = selCompany;
+
+        const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
 
         if (cancel) return;
-        const items = data.items || [];
-        setClaims(items);
+        const items = data.records || [];
+        setRows(items);
+        setTotalClaims(data.total_claims ?? items.length);
 
-        // إن لم يرجع الخادم قائمة شركات؛ نستنتجها من النتائج
-        const uniqIns = data.insurers?.length
-          ? data.insurers
-          : Array.from(new Set(items.map((c) => c.insurer))).sort();
-        setInsurers(uniqIns);
+        // استنتاج الشركات من حقل contract
+        const uniq = Array.from(
+          new Set(items.map((r) => r.contract).filter(Boolean))
+        ).sort();
+        setCompanies(uniq);
       } catch (e: any) {
         if (!cancel) setError(e?.message || "فشل تحميل البيانات");
       } finally {
@@ -146,40 +159,54 @@ export default function Insurance() {
     return () => {
       cancel = true;
     };
-  }, [selDate, selStatus, selInsurer, q]);
+  }, [selDate, selCompany]);
 
-  /* --------------------------- تصفية محلية احتياطية --------------------------- */
+  /* --------------------------- تصفية محلية --------------------------- */
   const filtered = useMemo(() => {
-    if (!q.trim()) return claims;
-    const s = q.trim();
-    return claims.filter(
-      (c) =>
-        c.patient.includes(s) ||
-        c.insurer.includes(s) ||
-        c.diagnosis.includes(s) ||
-        c.action.includes(s) ||
-        c.note.includes(s) ||
-        c.manager.includes(s) ||
-        (c.date ?? "").includes(s)
-    );
-  }, [claims, q]);
+    let out = rows;
+    if (selCompany !== "الكل") {
+      out = out.filter((r) => r.contract === selCompany);
+    }
+    if (q.trim()) {
+      const s = q.trim();
+      out = out.filter((r) => {
+        const vals = [
+          r.inv_no,
+          r.contract,
+          r.claim_type,
+          r.gross_amount_no_vat,
+          r.vat_amount,
+          r.discount,
+          r.deductible,
+          r.special_discount,
+          r.net_amount,
+          r.pay_to,
+          r.refer_ind,
+          r.emer_ind,
+          r.incur_date_from,
+          r.incur_date_to,
+          r.ai_analysis,
+        ]
+          .filter((v) => v !== undefined && v !== null)
+          .map((v) => String(v));
+        return vals.some((v) => v.includes(s));
+      });
+    }
+    return out;
+  }, [rows, selCompany, q]);
 
-  /* --------------------------- بيانات الشارت --------------------------- */
+  /* --------------------------- بيانات الشارت (عدد المطالبات لكل شركة) --------------------------- */
   const chartData = useMemo(() => {
-    // عدد الرفض لكل شركة من النتائج المُفلترة
     const by: Record<string, number> = {};
-    insurers.forEach((i) => (by[i] = 0));
-    filtered.forEach((c) => {
-      if (c.status === "مرفوض") by[c.insurer] = (by[c.insurer] ?? 0) + 1;
-    });
-    return insurers.map((i) => ({ label: i, value: by[i] ?? 0 }));
-  }, [filtered, insurers]);
+    companies.forEach((c) => (by[c] = 0));
+    filtered.forEach((r) => (by[r.contract] = (by[r.contract] ?? 0) + 1));
+    return companies.map((c) => ({ label: c, value: by[c] ?? 0 }));
+  }, [filtered, companies]);
 
-  const totalRejected =
-    chartData.reduce(
-      (s, d) => s + (Number.isFinite(d.value) ? d.value : 0),
-      0
-    ) || 1;
+  const maxVal = useMemo(
+    () => chartData.reduce((m, c) => Math.max(m, c.value), 0) || 1,
+    [chartData]
+  );
 
   /* --------------------------- تشغيل تحليل AI --------------------------- */
   async function runAi() {
@@ -189,8 +216,7 @@ export default function Insurance() {
       const res = await httpPost<AiInsight>(ENDPOINTS.analyze, {
         filters: {
           dateRange: selDate === "الأسبوع الأخير" ? "last_week" : "all",
-          status: selStatus,
-          insurer: selInsurer,
+          company: selCompany,
           q: q.trim(),
         },
         context: filtered,
@@ -218,7 +244,7 @@ export default function Insurance() {
       <div className="grid grid-cols-[280px_1fr]">
         {/* الشريط الجانبي */}
         <aside className="min-h-screen border-l bg-white sticky top-0 relative flex flex-col justify-between">
-          {/* الشعار في الزاوية العلوية اليمنى */}
+          {/* الشعار */}
           <div className="absolute top-4 right-4">
             <img
               src={logo}
@@ -227,7 +253,7 @@ export default function Insurance() {
             />
           </div>
 
-          {/* محتوى القائمة */}
+          {/* القائمة */}
           <div className="p-6 pt-20 space-y-4 flex-1">
             <nav className="px-4 space-y-2">
               <SideItem
@@ -275,7 +301,7 @@ export default function Insurance() {
 
         {/* المحتوى الرئيسي */}
         <main className="p-6 md:p-8 relative" dir="rtl">
-          {/* زر الرجوع للهوم (أيقونة فقط) */}
+          {/* زر الرجوع للهوم */}
           <button
             onClick={() => navigate("/home")}
             className="absolute top-4 right-4 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition"
@@ -286,7 +312,6 @@ export default function Insurance() {
 
           {/* الهيدر */}
           <div className="flex items-center justify-between gap-4 mt-2">
-            {/* العنوان + الأيقونات */}
             <div className="flex items-center gap-3">
               <div
                 className="text-xl md:text-2xl font-semibold"
@@ -302,7 +327,7 @@ export default function Insurance() {
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
                 className="w-full h-10 rounded-full border border-black/10 bg-white pl-10 pr-4 outline-none placeholder:text-black/50 focus:ring-4 focus:ring-emerald-300/30"
-                placeholder="ابحث..."
+                placeholder="ابحث برقم المطالبة، الشركة، النوع، التاريخ…"
               />
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/50" />
             </div>
@@ -310,18 +335,11 @@ export default function Insurance() {
             {/* الفلاتر */}
             <div className="flex items-end gap-2">
               <Dropdown
-                label="حالة الطلب"
-                value={selStatus}
-                onChange={setSelStatus}
-                options={statuses}
-              />
-              <Dropdown
                 label="شركة التأمين"
-                value={selInsurer}
-                onChange={setSelInsurer}
-                options={["الكل", ...insurers]}
+                value={selCompany}
+                onChange={setSelCompany}
+                options={["الكل", ...companies]}
               />
-
               <Dropdown
                 label="التاريخ"
                 value={selDate}
@@ -343,13 +361,13 @@ export default function Insurance() {
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-4 md:max-w-[760px]">
             <StatPill
               title="عدد المطالبات"
-              value={filtered.length}
+              value={filtered.length || totalClaims}
               bg="#D9DBFF"
               text={brand.secondary}
             />
             <StatPill
-              title="عدد شركات التأمين"
-              value={insurers.length}
+              title="عدد الشركات"
+              value={companies.length}
               bg="#CDEFE3"
               text="#1B4D3B"
             />
@@ -399,60 +417,56 @@ export default function Insurance() {
                     <p className="text-white/95 text-center">{ai.message}</p>
                   ) : (
                     <p className="text-white/90 text-center">
-                      اضغطي «تشغيل» لتحليل أنماط الرفض وفق الفلاتر الحالية.
+                      اضغطي «تشغيل» لتحليل أنماط المطالبات وفق الفلاتر الحالية.
                     </p>
                   )}
                 </div>
               </div>
             </div>
 
-            {/* الشارت الأخضر */}
+            {/* الشارت: عدد المطالبات لكل شركة */}
             <Card className="shadow-soft">
               <CardHeader className="pb-0">
-                <CardTitle className="text-base">نسبة الرفض</CardTitle>
+                <CardTitle className="text-base">
+                  عدد المطالبات لكل شركة
+                </CardTitle>
               </CardHeader>
               <CardContent className="pt-2">
-                <div className="relative rounded-xl border border-black/10 overflow-hidden min-h-[260px] bg-white">
-                  <div className="relative h-full flex flex-col gap-6 px-6 py-6">
+                <div className="h-[260px] rounded-xl border border-black/10 bg-white overflow-hidden">
+                  <div className="h-full w-full p-4">
                     {loading ? (
                       <div className="h-full w-full animate-pulse rounded-lg bg-black/5" />
                     ) : filtered.length === 0 ? (
-                      <div className="h-[200px] grid place-items-center text-black/50 text-sm">
+                      <div className="h-full w-full grid place-items-center text-black/50 text-sm">
                         لا توجد بيانات مطابقة للفلاتر الحالية
                       </div>
                     ) : (
-                      chartData.map((d) => {
-                        const percent = Math.round(
-                          (d.value / totalRejected) * 100
-                        );
-                        const width = Math.max(percent, 6);
-                        return (
-                          <div
-                            key={d.label}
-                            className="w-full text-right select-none"
-                          >
-                            <div className="flex items-center gap-3" dir="rtl">
-                              <div className="text-sm text-black/70 min-w-[72px]">
-                                {d.label}
+                      <div className="h-full flex items-end justify-between gap-4">
+                        {chartData.map((c) => {
+                          const h = Math.max(
+                            6,
+                            Math.round((c.value / maxVal) * 100)
+                          );
+                          return (
+                            <div
+                              key={c.label}
+                              className="flex-1 h-full flex flex-col justify-end items-center"
+                            >
+                              <div className="text-xs font-medium text-black/80 mb-1">
+                                {c.value}
                               </div>
-                              <div className="relative flex-1 h-8 rounded-md bg-[#F6FBF5] overflow-hidden">
-                                <div
-                                  className="absolute inset-y-0 right-0 rounded-md transition-all duration-500 ease-out"
-                                  style={{
-                                    width: `${width}%`,
-                                    background:
-                                      "linear-gradient(90deg, #2E7D32 0%, #7CD67F 100%)",
-                                  }}
-                                  title={`${d.label}: ${percent}%`}
-                                />
-                              </div>
-                              <div className="text-xs text-black/60 w-10 text-left">
-                                {percent}%
+                              <div
+                                className="w-7 md:w-8 rounded-t-lg bg-gradient-to-t from-[#4C4DE9] to-[#9AA0FF] transition-all duration-500 ease-out"
+                                style={{ height: `${h}%` }}
+                                title={`${c.label}: ${c.value}`}
+                              />
+                              <div className="mt-2 text-[11px] text-black/60 text-center truncate w-full">
+                                {c.label}
                               </div>
                             </div>
-                          </div>
-                        );
-                      })
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
                 </div>
@@ -467,21 +481,27 @@ export default function Insurance() {
                 <table className="w-full table-fixed" dir="rtl">
                   <thead>
                     <tr className="text-right text-black/70 text-sm">
-                      <Th w="110px">رقم المطالبة</Th>
-                      <Th w="140px">اسم المريض</Th>
+                      <Th w="120px">رقم المطالبة</Th>
                       <Th w="160px">شركة التأمين</Th>
-                      <Th w="160px">التشخيص</Th>
-                      <Th w="160px">الإجراء المطلوب</Th>
-                      <Th w="140px">حالة الطلب</Th>
-                      <Th w="120px">المدير</Th>
-                      <Th>ملاحظة</Th>
+                      <Th w="140px">نوع المطالبة</Th>
+                      <Th w="150px">إجمالي بدون ضريبة</Th>
+                      <Th w="120px">الضريبة</Th>
+                      <Th w="110px">الخصم</Th>
+                      <Th w="120px">التحمّل</Th>
+                      <Th w="140px">خصم خاص</Th>
+                      <Th w="140px">الصافي</Th>
+                      <Th w="140px">المستفيد</Th>
+                      <Th w="110px">إحالة</Th>
+                      <Th w="110px">طوارئ</Th>
+                      <Th w="160px">تاريخ البدء</Th>
+                      <Th w="160px">تاريخ الانتهاء</Th>
                     </tr>
                   </thead>
                   <tbody className="text-sm">
                     {loading ? (
                       Array.from({ length: 5 }).map((_, i) => (
                         <tr key={i} className="border-t border-black/5">
-                          {Array.from({ length: 8 }).map((__, j) => (
+                          {Array.from({ length: 14 }).map((__, j) => (
                             <Td key={j}>
                               <div className="h-4 bg-black/10 rounded animate-pulse" />
                             </Td>
@@ -491,29 +511,35 @@ export default function Insurance() {
                     ) : filtered.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={8}
+                          colSpan={14}
                           className="px-4 py-8 text-center text-black/60"
                         >
                           لا توجد سجلات للعرض.
                         </td>
                       </tr>
                     ) : (
-                      filtered.map((c, i) => (
+                      filtered.map((r, i) => (
                         <tr
-                          key={c.id}
+                          key={`${r.inv_no}-${i}`}
                           className={clsx(
                             "border-t border-black/5",
-                            i % 2 === 1 && "bg-black/2.5"
+                            i % 2 === 1 && "bg-black/[0.025]"
                           )}
                         >
-                          <Td w="110px">{c.id}</Td>
-                          <Td w="140px">{c.patient}</Td>
-                          <Td w="160px">{c.insurer}</Td>
-                          <Td w="160px">{c.diagnosis}</Td>
-                          <Td w="160px">{c.action}</Td>
-                          <Td w="140px">{c.status}</Td>
-                          <Td w="120px">{c.manager}</Td>
-                          <Td className="truncate">{c.note}</Td>
+                          <Td>{r.inv_no}</Td>
+                          <Td>{r.contract}</Td>
+                          <Td>{r.claim_type}</Td>
+                          <Td>{r.gross_amount_no_vat}</Td>
+                          <Td>{r.vat_amount}</Td>
+                          <Td>{r.discount}</Td>
+                          <Td>{r.deductible}</Td>
+                          <Td>{r.special_discount}</Td>
+                          <Td>{r.net_amount}</Td>
+                          <Td>{r.pay_to}</Td>
+                          <Td>{r.refer_ind}</Td>
+                          <Td>{r.emer_ind}</Td>
+                          <Td>{r.incur_date_from}</Td>
+                          <Td>{r.incur_date_to}</Td>
                         </tr>
                       ))
                     )}
@@ -556,7 +582,7 @@ function SideItem({
   );
 }
 
-/** Dropdown مخصص (بديل select) */
+/** Dropdown مخصص */
 function Dropdown({
   label,
   value,
