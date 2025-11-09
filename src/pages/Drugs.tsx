@@ -44,7 +44,7 @@ type RecordsResponse = {
 type AiInsight = { message: string; meta?: Record<string, unknown> };
 
 /* ============================== API config ============================== */
-const RAW_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
+const RAW_BASE_URL = "https://haseef.onrender.com";
 
 function joinUrl(base: string, path: string) {
   if (!base) return path;
