@@ -3,6 +3,22 @@
 @tailwind components;
 @tailwind utilities;
 
+/* =============================== */
+/* الهوية اللونية والمتغيرات العامة */
+/* =============================== */
+:root {
+  --brand-green: #0e6b43;
+  --brand-green-hover: #0f7d4d;
+  --brand-accent: #97fc4a;
+  --brand-secondary: #0d16d1;
+
+  --surface: #ffffff;
+  --ink: #111827;
+  --ink-50: rgba(0, 0, 0, 0.5);
+  --ink-60: rgba(0, 0, 0, 0.6);
+  --ink-80: rgba(0, 0, 0, 0.8);
+}
+
 /* ===== الأساس ===== */
 html {
   direction: rtl;
@@ -24,7 +40,7 @@ body {
     linear-gradient(180deg, #f5f7fb 0%, #e9edf5 100%);
 }
 
-/* ظلال */
+/* ظلال موحّدة */
 .shadow-soft {
   box-shadow: 0 10px 24px rgba(2, 6, 23, 0.07);
 }
@@ -32,43 +48,131 @@ body {
   box-shadow: 0 12px 30px rgba(13, 22, 209, 0.14);
 }
 
-/* أزرار */
+/* أزرار عامة */
 button {
   @apply rounded-full font-semibold transition-all duration-150;
 }
 
-/* بطاقات */
+/* بطاقات عامة */
 .card {
   @apply bg-white rounded-2xl shadow-soft p-5;
 }
 
-/* ===== جداول مضغوطة ===== */
-.table-compact thead th {
-  @apply bg-white font-medium text-black/70 border-b border-black/10;
+/* =============================== */
+/* بطاقة AI (تدرّج متناسق)        */
+/* =============================== */
+.bg-ai-card {
+  background: linear-gradient(135deg, #0d16d1 0%, #2f3cf1 60%, #6a75ff 100%);
 }
+
+/* =============================== */
+/* فلاتر / Dropdown               */
+/* =============================== */
+.btn-filter {
+  height: 36px;
+  border-radius: 999px;
+  font-weight: 700;
+  background: var(--brand-green);
+  color: #fff;
+}
+.btn-filter:hover {
+  background: var(--brand-green-hover);
+}
+
+.dropdown-scroll {
+  max-height: 280px; /* طول منطقي للقوائم الطويلة */
+  overflow: auto;
+  border-radius: 12px;
+}
+
+/* =============================== */
+/* الجداول المضغوطة + الثبات      */
+/* =============================== */
+.table-compact {
+  width: 100%;
+  border-collapse: collapse; /* يزيل الفراغات بين الخلايا */
+  border-spacing: 0;
+  table-layout: fixed; /* يمنع تمدد الأعمدة */
+}
+
+.table-compact thead th {
+  @apply bg-white font-medium text-black/70;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+  padding: 8px 10px;
+  font-size: 13px;
+  text-align: right;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background-color: #fff;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
+}
+
 .table-compact th,
 .table-compact td {
-  @apply px-3 py-2 text-xs;
+  padding: 6px 10px; /* يقلل ارتفاع الصف */
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: right;
+  vertical-align: middle; /* يمنع التمدد العمودي */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
+
+/* صفوف متبادلة للوضوح */
 .table-compact tbody tr:nth-child(even) {
   background-color: rgba(0, 0, 0, 0.02);
 }
 
-/* خلايا تُقصّ للنص الطويل */
-.cell-clip {
-  @apply whitespace-nowrap overflow-hidden text-ellipsis;
+/* حدود خفيفة بين الصفوف */
+.table-compact tbody tr {
+  border-top: 1px solid rgba(0, 0, 0, 0.05);
 }
 
-/* ===== الرسم البياني المضغوط ===== */
+/* خلايا تُقصّ للنص الطويل */
+.cell-clip {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* حاوية تمرير بارتفاع ثابت + رأس مثبت */
+.table-wrapper {
+  max-height: 420px; /* يمكنك تعديله حسب طول الصفحة */
+  overflow-y: auto;
+  border-radius: 12px;
+  background: transparent; /* استخدمي #fff لو تفضلين خلفية بيضاء */
+}
+
+/* شريط تمرير أنيق */
+.table-wrapper::-webkit-scrollbar {
+  width: 8px;
+}
+.table-wrapper::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 9999px;
+}
+
+/* محاذاة رقمية اختيارية */
+.td-num {
+  text-align: center;
+}
+
+/* =============================== */
+/* مخططات مصغّرة (اختياري)       */
+/* =============================== */
 .chart-wrap {
   height: 200px;
-} /* كان كبير: صار 200px */
+}
 .chart-gap {
   gap: 0.5rem;
-} /* مسافات أصغر بين الأعمدة */
+}
 .chart-bar {
   width: 14px;
-} /* العرض لكل عمود */
+}
 .chart-tick {
   @apply text-[10px] text-black/60;
 }
@@ -76,14 +180,9 @@ button {
   @apply text-[10px] text-black/70 mb-1;
 }
 
-/* قوائم منسدلة طويلة -> Scroll */
-.dropdown-scroll {
-  max-height: 260px;
-  overflow: auto;
-  border-radius: 12px;
-}
-
-/* شاشات صغيرة */
+/* =============================== */
+/* شاشات صغيرة                    */
+/* =============================== */
 @media (max-width: 640px) {
   body {
     font-size: 13px;
