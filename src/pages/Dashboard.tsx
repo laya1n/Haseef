@@ -1,4 +1,5 @@
 // src/pages/Dashboard.tsx
+/// <reference types="vite/client" />
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import logo from "@/assets/logo2.png";
@@ -58,8 +59,8 @@ function joinUrl(base: string, path: string) {
 }
 
 const ENDPOINTS = {
-  records: "/api/medical/records",
-  analyze: "/api/ai/analyze",
+  records: "/medical/records",
+  analyze: "/ai/analyze",
 };
 
 /* ============================== أدوات مساعدة ============================== */
