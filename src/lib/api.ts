@@ -9,7 +9,7 @@ type Params = Record<string, string | number | boolean | null | undefined>;
 
 const ENV_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
 export const API_BASE =
-  (ENV_BASE && ENV_BASE.replace(/\/+$/, "")) || "https://haseef.onrender.com";
+  (ENV_BASE && ENV_BASE.replace(/\/+$/, "")) || "http://127.0.0.1:8000";
 
 
 function join(path: string): string {
