@@ -7,8 +7,10 @@ type Params = Record<string, string | number | boolean | null | undefined>;
 /* ============================== Base URL ============================== */
 // ضعي في .env: VITE_API_BASE_URL=http://127.0.0.1:8000
 const ENV_BASE = import.meta.env.VITE_API_BASE_URL as string | undefined;
-export const API_BASE =
-  (ENV_BASE && ENV_BASE.replace(/\/+$/, "")) || "http://127.0.0.1:8000";
+//export const API_BASE =
+//  (ENV_BASE && ENV_BASE.replace(/\/+$/, "")) || "http://127.0.0.1:8000"; this is temp
+export const API_BASE = "https://haseef.onrender.com";
+
 
 function join(path: string): string {
   const p = path.startsWith("/") ? path : `/${path}`;
