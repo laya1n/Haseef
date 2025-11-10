@@ -69,9 +69,5 @@ def logout(response: Response):
     return {"ok": True}
 
 @router.get("/me")
-def me(request: Request):
-    token = request.cookies.get("access_token")
-    payload = verify_token(token) if token else None
-    if not payload:
-        raise HTTPException(status_code=401, detail="Not authenticated")
-    return {"national_id": payload.get("sub")}
+def me():
+    return {"ok": True}
