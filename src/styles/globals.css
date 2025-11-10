@@ -1,4 +1,5 @@
 /* src/styles/globals.css */
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -86,13 +87,23 @@ button {
 }
 
 /* =============================== */
+/* أدوات تمرير عامة                */
+/* =============================== */
+.scroll-x {
+  overflow-x: auto; /* للتمرير الأفقي عند كثرة الأعمدة */
+}
+.scroll-y {
+  overflow-y: auto; /* للتمرير العمودي عند كثرة الصفوف */
+}
+
+/* =============================== */
 /* الجداول المضغوطة + الثبات      */
 /* =============================== */
 .table-compact {
   width: 100%;
   border-collapse: collapse; /* يزيل الفراغات بين الخلايا */
   border-spacing: 0;
-  table-layout: fixed; /* يمنع تمدد الأعمدة */
+  table-layout: fixed; /* يمنع تمدد الأعمدة بفعل النص الطويل */
 }
 
 .table-compact thead th {
@@ -108,6 +119,7 @@ button {
   box-shadow: 0 1px 0 rgba(0, 0, 0, 0.06);
 }
 
+/* قصّ أحادي السطر داخل الخلايا */
 .table-compact th,
 .table-compact td {
   padding: 6px 10px; /* يقلل ارتفاع الصف */
@@ -139,9 +151,19 @@ button {
   white-space: nowrap;
 }
 
+/* بديل يدعم الكلمات الطويلة جدًا بدون كسر التصميم (ICD, emails…) */
+.cell-clip-break {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  word-break: break-all; /* يكسر الكلمات الطويلة جدًا */
+}
+
 /* حاوية تمرير بارتفاع ثابت + رأس مثبت */
 .table-wrapper {
-  max-height: 420px; /* يمكنك تعديله حسب طول الصفحة */
+  max-height: 420px; /* عدّلي حسب طول الصفحة */
   overflow-y: auto;
   border-radius: 12px;
   background: transparent; /* استخدمي #fff لو تفضلين خلفية بيضاء */
@@ -150,6 +172,7 @@ button {
 /* شريط تمرير أنيق */
 .table-wrapper::-webkit-scrollbar {
   width: 8px;
+  height: 8px;
 }
 .table-wrapper::-webkit-scrollbar-thumb {
   background: rgba(0, 0, 0, 0.18);
@@ -161,11 +184,59 @@ button {
   text-align: center;
 }
 
+/* أحجام أعمدة جاهزة (اختياري) */
+.col-xs {
+  max-width: 110px;
+}
+.col-sm {
+  max-width: 160px;
+}
+.col-md {
+  max-width: 220px;
+}
+.col-lg {
+  max-width: 320px;
+}
+.col-xl {
+  max-width: 480px;
+}
+
+/* قصّ متعدد الأسطر (استخدمه خارج الجداول عند الحاجة) */
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2; /* عدد الأسطر */
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* =============================== */
-/* مخططات مصغّرة (اختياري)       */
+/* تحسينات AG Grid (اختياري)      */
+/* =============================== */
+.ag-theme-quartz {
+  direction: rtl;
+}
+.ag-theme-quartz .ag-cell {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ag-theme-quartz .ag-header-cell-label {
+  justify-content: flex-end; /* عناوين الأعمدة إلى اليمين */
+}
+
+/* =============================== */
+/* مخططات (Recharts/Chart.js)     */
 /* =============================== */
 .chart-wrap {
-  height: 200px;
+  width: 100%;
+  height: 320px; /* حجم ثابت يمنع التمدد */
+  position: relative; /* مهم لـ maintainAspectRatio:false */
 }
 .chart-gap {
   gap: 0.5rem;
@@ -188,6 +259,6 @@ button {
     font-size: 13px;
   }
   .chart-wrap {
-    height: 180px;
+    height: 240px;
   }
 }
