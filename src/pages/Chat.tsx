@@ -3,7 +3,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import logo from "@/assets/logo2.png";
 import {
-  Bell,
   Plus,
   Shield,
   Pill,
@@ -17,10 +16,12 @@ import {
   Home,
   UserRound,
   Sparkles,
+  Paperclip,
+  X,
 } from "lucide-react";
 import clsx from "clsx";
 
-/* ============================== الهوية البصرية (مطابقة للداشبورد) ============================== */
+/* ============================== الهوية البصرية ============================== */
 const brand = {
   green: "#0E6B43",
   greenHover: "#0f7d4d",
@@ -28,16 +29,25 @@ const brand = {
   secondary: "#0D16D1",
 };
 
-/* ============================== Types ============================== */
+/* ============================== الأنواع ============================== */
 type Msg = {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
   time?: string;
-  sourceTag?: string; // وسم المصدر (اختياري)
+  sourceTag?: string;
 };
 
-/* ============================== Utilities ============================== */
+type UploadItem = {
+  id: string;
+  file: File;
+  status: "queued" | "uploading" | "done" | "error";
+  progress: number; // 0..100
+  serverName?: string;
+  errorText?: string;
+};
+
+/* ============================== أدوات مساعدة ============================== */
 const nowTime = () =>
   new Date().toLocaleTimeString("ar-SA", {
     hour: "2-digit",
@@ -45,18 +55,18 @@ const nowTime = () =>
   });
 
 const starterSuggestions = [
-  "حلّل تكرار التشخيص خلال آخر شهر",
-  "اعطني ملخص مطالبات التأمين المرفوضة",
-  "هل يوجد صرف دواء غير منطقي؟",
-  "اقترح تنبيهات ذكية للأطباء",
+  "حلّل تكرار التشخيص خلال آخر شهر (سجلات طبية فقط)",
+  "أعطني قائمة بالمرضى ذوي الزيارات المتكررة لنفس ICD",
+  "ما أكثر الشكاوى الرئيسية تكرارًا خلال الشهر الحالي؟",
+  "هل توجد زيارات عاجلة كثيرة لطبيب معيّن؟",
 ];
 
-/* ============================== API config (مطابق للداشبورد) ============================== */
-// ضعي قيمة الدومين في .env:  VITE_API_BASE_URL=https://api.example.com
+/* ============================== إعدادات API ============================== */
+// ضعي الدومين في .env: VITE_API_BASE_URL=https://api.example.com
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "";
 
 async function httpPost<T>(path: string, body: unknown) {
-  const res = await fetch(BASE_URL + path || path, {
+  const res = await fetch((BASE_URL ? BASE_URL : "") + path, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
@@ -66,21 +76,18 @@ async function httpPost<T>(path: string, body: unknown) {
   return (await res.json()) as T;
 }
 
-/** Streaming via fetch ReadableStream (UTF-8 text chunks). */
 async function streamPost(
   path: string,
   body: unknown,
   onChunk: (text: string) => void
 ) {
-  const res = await fetch(BASE_URL + path || path, {
+  const res = await fetch((BASE_URL ? BASE_URL : "") + path, {
     method: "POST",
     credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok || !res.body) {
-    throw new Error(await res.text());
-  }
+  if (!res.ok || !res.body) throw new Error(await res.text());
   const reader = res.body.getReader();
   const decoder = new TextDecoder("utf-8");
   while (true) {
@@ -90,43 +97,71 @@ async function streamPost(
   }
 }
 
+/** رفع ملف واحد عبر FormData (للـ medical domain) */
+async function uploadFileOnce(
+  path: string,
+  file: File,
+  onProgress?: (pct: number) => void
+): Promise<{ name: string }> {
+  onProgress?.(10);
+  const fd = new FormData();
+  fd.append("file", file);
+  fd.append("domain", "medical");
+
+  const res = await fetch((BASE_URL ? BASE_URL : "") + path, {
+    method: "POST",
+    credentials: "include",
+    body: fd,
+  });
+
+  if (!res.ok) throw new Error(await res.text());
+  onProgress?.(100);
+  const json = await res.json();
+  return { name: json?.name || file.name };
+}
+
+/* نقاط النهاية الخاصة بالسجلات الطبية */
 const ENDPOINTS = {
-  chat: "/api/assistant/chat", // استجابة كاملة
-  stream: "/api/assistant/stream", // استجابة متدفقة (اختياري)
-  upload: "/api/files/upload", // اختياري للمرفقات
+  chat: "/api/assistant/medical/chat", // استجابة كاملة
+  stream: "/api/assistant/medical/stream", // استجابة متدفقة
+  upload: "/api/files/upload-medical", // رفع مرفقات
 };
 
-/* ============================== Component ============================== */
+/* ============================== المكوّن الرئيسي ============================== */
 export default function Chat() {
   const navigate = useNavigate();
 
-  /* --------------- State --------------- */
+  // الرسائل
   const [messages, setMessages] = useState<Msg[]>([
     {
       id: crypto.randomUUID(),
       role: "assistant",
       content:
-        "مرحبًا! أنا مساعدك الذكي لتحليل السجلات الطبية والتأمينية وصرف الأدوية. كيف أستطيع مساعدتك اليوم؟",
+        "مرحبًا! أنا مساعد السجلات الطبية فقط. أستطيع تحليل الزيارات، التشخيصات (ICD)، الشكاوى، والأنماط الزمنية. يمكنكِ إرفاق ملفات CSV/XLSX/JSON/PDF لدعم الإجابة.",
       time: nowTime(),
     },
   ]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [useStreaming, setUseStreaming] = useState(true); // يمكنكِ إطفاءه إذا كان الـbackend لا يدعم البثّ
+  const [useStreaming, setUseStreaming] = useState(true);
 
+  // رفع الملفات
+  const [uploads, setUploads] = useState<UploadItem[]>([]);
+
+  // مراجع
   const scrollRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
 
-  /* --------------- Auto scroll --------------- */
+  // تمرير لأسفل تلقائي
   useEffect(() => {
     scrollRef.current?.scrollTo({
       top: scrollRef.current.scrollHeight,
       behavior: "smooth",
     });
-  }, [messages, isTyping, error]);
+  }, [messages, isTyping, error, uploads]);
 
-  /* --------------- Autosize textarea --------------- */
+  // ضبط ارتفاع الـ textarea تلقائيًا
   useEffect(() => {
     if (!taRef.current) return;
     taRef.current.style.height = "0px";
@@ -134,7 +169,7 @@ export default function Chat() {
       Math.min(160, taRef.current.scrollHeight) + "px";
   }, [input]);
 
-  /* --------------- Send handlers --------------- */
+  // إرسال رسالة
   const handleSend = async () => {
     const trimmed = input.trim();
     if (!trimmed) return;
@@ -154,8 +189,12 @@ export default function Chat() {
     try {
       setIsTyping(true);
 
+      // أسماء الملفات التي تم رفعها بنجاح
+      const attachedNames = uploads
+        .filter((u) => u.status === "done" && !!u.serverName)
+        .map((u) => u.serverName!);
+
       if (useStreaming) {
-        // 1) بثّ تدريجي
         const draftId = crypto.randomUUID();
         setMessages((m) => [
           ...m,
@@ -165,7 +204,11 @@ export default function Chat() {
         let buffer = "";
         await streamPost(
           ENDPOINTS.stream,
-          { messages: [...messages, userMsg] },
+          {
+            domain: "medical",
+            files: attachedNames,
+            messages: [...messages, userMsg],
+          },
           (chunk) => {
             buffer += chunk;
             setMessages((m) =>
@@ -176,10 +219,13 @@ export default function Chat() {
           }
         );
       } else {
-        // 2) استجابة كاملة
         const res = await httpPost<{ content: string; sourceTag?: string }>(
           ENDPOINTS.chat,
-          { messages: [...messages, userMsg] }
+          {
+            domain: "medical",
+            files: attachedNames,
+            messages: [...messages, userMsg],
+          }
         );
         setMessages((m) => [
           ...m,
@@ -199,6 +245,7 @@ export default function Chat() {
     }
   };
 
+  // إدخال عبر Enter
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -211,7 +258,80 @@ export default function Chat() {
     setTimeout(handleSend, 0);
   };
 
-  const headerTitle = useMemo(() => "مساعد ذكي", []);
+  /* ============================== رفع الملفات ============================== */
+  const onChooseFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const allowed = ".csv,.xlsx,.xls,.json,.pdf"
+      .split(",")
+      .map((x) => x.trim());
+    const newItems: UploadItem[] = files.map((file) => {
+      const ok =
+        allowed.some((ext) => file.name.toLowerCase().endsWith(ext)) ||
+        allowed.includes(file.type);
+      return {
+        id: crypto.randomUUID(),
+        file,
+        status: ok ? "queued" : "error",
+        progress: 0,
+        errorText: ok ? undefined : "امتداد غير مدعوم",
+      };
+    });
+    setUploads((u) => [...newItems, ...u]);
+    e.currentTarget.value = "";
+  };
+
+  const doUpload = async (item: UploadItem) => {
+    if (item.status !== "queued") return;
+    setUploads((u) =>
+      u.map((x) =>
+        x.id === item.id ? { ...x, status: "uploading", progress: 5 } : x
+      )
+    );
+    try {
+      const res = await uploadFileOnce(ENDPOINTS.upload, item.file, (pct) =>
+        setUploads((u) =>
+          u.map((x) => (x.id === item.id ? { ...x, progress: pct } : x))
+        )
+      );
+      setUploads((u) =>
+        u.map((x) =>
+          x.id === item.id
+            ? { ...x, status: "done", progress: 100, serverName: res.name }
+            : x
+        )
+      );
+    } catch (e: any) {
+      setUploads((u) =>
+        u.map((x) =>
+          x.id === item.id
+            ? {
+                ...x,
+                status: "error",
+                errorText: e?.message || "فشل الرفع",
+                progress: 0,
+              }
+            : x
+        )
+      );
+    }
+  };
+
+  const doUploadAll = async () => {
+    for (const it of uploads) {
+      if (it.status === "queued") {
+        // eslint-disable-next-line no-await-in-loop
+        await doUpload(it);
+      }
+    }
+  };
+
+  const removeUpload = (id: string) =>
+    setUploads((u) => u.filter((x) => x.id !== id));
+
+  /* ============================== العرض ============================== */
+  const headerTitle = useMemo(() => "مساعد السجلات الطبية", []);
 
   return (
     <div
@@ -222,9 +342,9 @@ export default function Chat() {
       }}
     >
       <div className="grid grid-cols-[280px_1fr]">
-        {/* Sidebar — مطابق للداشبورد */}
+        {/* الشريط الجانبي */}
         <aside className="min-h-screen border-l bg-white sticky top-0 relative flex flex-col justify-between">
-          {/* الشعار في الزاوية العلوية اليمنى */}
+          {/* الشعار */}
           <div className="absolute top-4 right-4">
             <img
               src={logo}
@@ -233,7 +353,7 @@ export default function Chat() {
             />
           </div>
 
-          {/* محتوى القائمة */}
+          {/* القائمة */}
           <div className="p-6 pt-20 space-y-4 flex-1">
             <nav className="px-4 space-y-2">
               <SideItem
@@ -253,13 +373,13 @@ export default function Chat() {
               />
               <SideItem
                 icon={<BellRing className="size-4" />}
-                label="الاشعارات"
+                label="الإشعارات"
                 onClick={() => navigate("/notifications")}
               />
               <SideItem
                 active
                 icon={<MessageSquareCode className="size-4" />}
-                label="المساعد ذكي"
+                label="المساعد الذكي"
               />
             </nav>
           </div>
@@ -279,13 +399,13 @@ export default function Chat() {
           </div>
         </aside>
 
-        {/* Main */}
+        {/* المحتوى الرئيسي */}
         <main className="p-6 md:p-8 relative" dir="rtl">
-          {/* زر الرجوع للهوم — نفس النمط */}
+          {/* زر الرجوع إلى الداشبورد الطبية */}
           <button
-            onClick={() => navigate("/home")}
+            onClick={() => navigate("/medicalRecords")}
             className="absolute top-4 right-4 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition"
-            title="العودة للصفحة الرئيسية"
+            title="العودة لصفحة السجلات الطبية"
           >
             <Home className="size-5" style={{ color: brand.green }} />
           </button>
@@ -301,30 +421,8 @@ export default function Chat() {
               </h1>
               <Sparkles className="size-5 text-[#4C4DE9]" />
             </div>
-            <div className="flex items-center gap-3"></div>
-          </div>
 
-          {/* Status */}
-          {error && (
-            <div className="mt-4 flex items-center gap-2 text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-xl">
-              <TriangleAlert className="size-4" />
-              <span className="text-sm">{error}</span>
-            </div>
-          )}
-
-          {/* Suggestions */}
-          <div className="mt-4 flex flex-wrap gap-2">
-            {starterSuggestions.map((s) => (
-              <button
-                key={s}
-                onClick={() => onPickSuggestion(s)}
-                className="h-9 px-3 rounded-full bg-white border border-black/10 shadow-sm text-sm hover:bg-black/5"
-              >
-                {s}
-              </button>
-            ))}
-
-            {/* زر تبديل البثّ */}
+            {/* تبديل وضع البث */}
             <button
               onClick={() => setUseStreaming((v) => !v)}
               className={clsx(
@@ -335,11 +433,32 @@ export default function Chat() {
               )}
               title="التبديل بين استجابة كاملة وبثّ تدريجي"
             >
-              {useStreaming ? "وضع البثّ مفعّل" : "وضع البثّ متوقف"}
+              {useStreaming ? "وضع البثّ مُفعّل" : "وضع البثّ متوقف"}
             </button>
           </div>
 
-          {/* Chat area */}
+          {/* حالة الخطأ */}
+          {error && (
+            <div className="mt-4 flex items-center gap-2 text-red-700 bg-red-50 border border-red-200 px-4 py-3 rounded-xl">
+              <TriangleAlert className="size-4" />
+              <span className="text-sm">{error}</span>
+            </div>
+          )}
+
+          {/* اقتراحات */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {starterSuggestions.map((s) => (
+              <button
+                key={s}
+                onClick={() => onPickSuggestion(s)}
+                className="h-9 px-3 rounded-full bg-white border border-black/10 shadow-sm text-sm hover:bg-black/5"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+
+          {/* منطقة المحادثة */}
           <div
             ref={scrollRef}
             className="mt-4 rounded-2xl bg-white border border-black/10 shadow-soft h-[62vh] md:h-[66vh] overflow-y-auto p-4"
@@ -348,7 +467,6 @@ export default function Chat() {
               {messages.map((m) => (
                 <MessageBubble key={m.id} msg={m} />
               ))}
-
               {isTyping && (
                 <div className="pt-2">
                   <TypingBubble />
@@ -357,10 +475,85 @@ export default function Chat() {
             </div>
           </div>
 
-          {/* Composer — بدون مرفقات/مايك/إيموجي */}
+          {/* Composer — أيقونة ملف + صندوق كتابة + إرسال */}
           <div className="mt-4 mx-auto max-w-3xl">
             <div className="rounded-2xl bg-white border border-black/10 shadow-soft p-3">
+              {/* شارات الملفات */}
+              {uploads.length > 0 && (
+                <div className="px-1 pb-2 flex flex-wrap gap-2">
+                  {uploads.map((u) => (
+                    <div
+                      key={u.id}
+                      className={clsx(
+                        "inline-flex items-center gap-2 rounded-full pl-2 pr-1 h-8 text-[12px]",
+                        u.status === "error"
+                          ? "bg-red-50 text-red-700 border border-red-200"
+                          : "bg-black/5 text-black/70"
+                      )}
+                      title={u.file.name}
+                    >
+                      <span className="px-1 tabular-nums">
+                        {u.file.name.split(".").pop()?.toUpperCase()}
+                      </span>
+                      <span className="max-w-[150px] truncate">
+                        {u.file.name}
+                      </span>
+                      {u.status === "uploading" && (
+                        <span className="text-[11px] opacity-70">
+                          {u.progress}%
+                        </span>
+                      )}
+                      {u.status === "done" && (
+                        <span className="text-[11px] opacity-70">تم</span>
+                      )}
+                      {u.status === "queued" && (
+                        <button
+                          onClick={() => doUpload(u)}
+                          className="h-6 px-2 rounded-full bg-white border text-[11px]"
+                          title="رفع"
+                        >
+                          رفع
+                        </button>
+                      )}
+                      <button
+                        onClick={() => removeUpload(u.id)}
+                        className="h-6 w-6 rounded-full hover:bg-black/10 grid place-items-center"
+                        title="إزالة"
+                      >
+                        <X className="size-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                  {uploads.some((u) => u.status === "queued") && (
+                    <button
+                      onClick={doUploadAll}
+                      className="h-8 px-3 rounded-full text-white text-[12px] font-semibold"
+                      style={{ backgroundColor: brand.secondary }}
+                      title="رفع جميع الملفات"
+                    >
+                      رفع الكل
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div className="flex items-end gap-2">
+                {/* أيقونة اختيار الملف */}
+                <label
+                  className="h-10 w-10 rounded-full border border-black/10 grid place-items-center hover:bg-black/5 cursor-pointer"
+                  title="إرفاق ملف"
+                >
+                  <Paperclip className="size-4" />
+                  <input
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={onChooseFiles}
+                    accept=".csv,.xlsx,.xls,.json,.pdf"
+                  />
+                </label>
+
+                {/* صندوق الكتابة */}
                 <textarea
                   ref={taRef}
                   dir="rtl"
@@ -368,7 +561,7 @@ export default function Chat() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={onKeyDown}
                   rows={1}
-                  placeholder="اكتب رسالتك… (Enter للإرسال • Shift+Enter لسطر جديد)"
+                  placeholder="اكتبي سؤالك حول السجلات الطبية فقط… (Enter للإرسال • Shift+Enter لسطر جديد)"
                   className="
                     flex-1 resize-none leading-6
                     rounded-xl border border-black/10 bg-white
@@ -378,8 +571,14 @@ export default function Chat() {
                   style={{ maxHeight: 160 }}
                 />
 
+                {/* زر الإرسال */}
                 <button
-                  onClick={handleSend}
+                  onClick={async () => {
+                    if (uploads.some((u) => u.status === "queued")) {
+                      await doUploadAll();
+                    }
+                    handleSend();
+                  }}
                   disabled={!input.trim() || isTyping}
                   className={clsx(
                     "h-10 px-4 rounded-full text-sm font-semibold transition",
@@ -404,7 +603,7 @@ export default function Chat() {
   );
 }
 
-/* ============================== Sub components (مطابقة للنمط) ============================== */
+/* ============================== مكوّنات فرعية ============================== */
 function SideItem({
   icon,
   label,
@@ -441,7 +640,7 @@ function MessageBubble({ msg }: { msg: Msg }) {
       <div
         className={clsx(
           "size-9 rounded-full grid place-items-center shrink-0",
-          isUser ? "bg-[#E7E9FF] text-[#0D16D1]" : "bg-[#EAF6FF] text-[#145C8C]"
+          isUser ? "bg-[#2B2D6B] text-white" : "bg-[#EAF6FF] text-[#145C8C]"
         )}
         title={isUser ? "أنت" : "المساعد"}
       >
@@ -453,7 +652,7 @@ function MessageBubble({ msg }: { msg: Msg }) {
           className={clsx(
             "rounded-2xl px-4 py-2 leading-7 text-[15px] shadow-sm",
             isUser
-              ? "bg-[#F8F9FF] text-white rounded-tr-sm" // خلفية المستخدمض
+              ? "bg-[#2B2D6B] text-white rounded-tr-sm"
               : "bg-white text-neutral-900 border border-black/10 rounded-tl-sm"
           )}
         >
@@ -481,8 +680,7 @@ function TypingBubble() {
       <div className="max-w-[78%]">
         <div className="rounded-2xl px-4 py-2 bg-white border border-black/10 shadow-sm">
           <span className="inline-flex items-center gap-2 text-sm text-black/70">
-            المساعد يكتب
-            <Dots />
+            المساعد يكتب <Dots />
           </span>
         </div>
       </div>

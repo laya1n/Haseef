@@ -262,3 +262,14 @@ button {
     height: 240px;
   }
 }
+@media print {
+  .print\\:shadow-none {
+    box-shadow: none !important;
+  }
+  .print\\:p-3 {
+    padding: 12px !important;
+  }
+  .print\\:gap-2 {
+    gap: 8px !important;
+  }
+}
