@@ -61,8 +61,18 @@ export type LoginPayload = {
   remember?: boolean; // اختياري: لتحديد مدة الكوكي
 };
 
+export type RegisterPayload = {
+  name: string;
+  national_id: string;
+  password: string;
+}
+
 export function apiLogin(payload: LoginPayload) {
   return httpPost<{ ok: true }>("/auth/login", payload);
+}
+
+export function apiRegister(payload: RegisterPayload) {
+  return httpPost<{ message: string }>("/auth/register", payload);
 }
 
 export function apiLogout() {
