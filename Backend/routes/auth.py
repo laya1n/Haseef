@@ -57,7 +57,7 @@ def login(payload: dict, response: Response, db: Session = Depends(get_db)):
         value=token,
         httponly=True,
         secure=False,          # اجعله True في الإنتاج مع HTTPS
-        samesite="lax",
+        samesite="None",
         max_age=max_age,
         path="/",
     )
