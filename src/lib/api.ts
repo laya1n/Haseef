@@ -92,3 +92,5 @@ export function apiGetInsurance(params?: Params) {
 export function apiGetDrugs(params?: Params) {
   return httpGet<unknown>(ENDPOINTS.drugRecords, params);
 }
+export const apiGet = httpGet;
+export const apiPost = httpPost;

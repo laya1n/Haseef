@@ -1,7 +1,7 @@
 // src/pages/Register.tsx
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { UserRound, IdCard, Lock, Eye, EyeOff, Check } from "lucide-react";
+import { UserRound, Contact, Mail, Lock, Eye, EyeOff, Check } from "lucide-react";
 
 /* ============================== Types ============================== */
 type NewUser = {
@@ -170,7 +170,7 @@ export default function Register() {
               />
               {!national_id && (
                 <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[#92E3A9]">
-                  <IdCard className="size-5" />
+                  <Contact className="size-5" />
                 </span>
               )}
             </div>
