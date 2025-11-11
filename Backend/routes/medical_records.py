@@ -12,7 +12,7 @@ def load_medical_records():
     data_path = Path(__file__).resolve().parents[1] / "data" / "medical_records.xlsx"
     df = pd.read_excel(data_path, engine="openpyxl")
 
-    # الأعمدة المطلوبة فقط
+    # columns in to show
     columns = [
         "Name", "Patient Name", "Treatment Date", "ICD10CODE",
         "Chief Complaint", "SignificantSignes", "CLAIM_TYPE",
@@ -20,14 +20,14 @@ def load_medical_records():
     ]
     df = df[[c for c in columns if c in df.columns]].copy()
 
-    # إعادة التسمية لأسماء موحدة
+    # renaming columns
     df.columns = [
         "doctor_name", "patient_name", "treatment_date", "ICD10CODE",
         "chief_complaint", "significant_signs", "claim_type",
         "refer_ind", "emer_ind", "contract",
     ]
 
-    #  إصلاح صيغة التاريخ
+    #  formatting date
     td = df["treatment_date"].astype(str).str.strip()
     print("🧾 Raw treatment_date values (first 10):", td.head(10).tolist())
 
@@ -82,7 +82,7 @@ def get_medical_records(
 ):
     df = load_medical_records()
 
-    # فلتر التاريخ (من الكالندر)
+    # date filter
     if date:
         try:
             d = pd.to_datetime(date).date()
@@ -90,24 +90,24 @@ def get_medical_records(
         except Exception:
             pass
 
-    # فلتر الطبيب
+    # doctor filter
     if doctor and "norm_doctor_name" in df.columns:
         key = str(doctor).strip().lower()
         df = df[df["norm_doctor_name"].str.contains(key, na=False)]
 
-    # فلتر المريض
+    # patient filter
     if patient and "norm_patient_name" in df.columns:
         key = str(patient).strip().lower()
         df = df[df["norm_patient_name"].str.contains(key, na=False)]
 
-    # بحث عام في جميع الأعمدة النصية
+    # general search
     if q:
         key = str(q).strip().lower()
         norm_cols = [c for c in df.columns if c.startswith("norm_")]
         mask = np.column_stack([df[c].str.contains(key, na=False) for c in norm_cols]).any(axis=1)
         df = df[mask]
 
-    # النتائج النهائية
+    # statics
     total_records = int(len(df))
     total_doctors = int(df["doctor_name"].nunique()) if total_records > 0 else 0
     alerts_count = 0
