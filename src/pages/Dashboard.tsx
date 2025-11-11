@@ -11,7 +11,6 @@ import {
   Shield,
   History,
   CalendarDays,
-  Bot,
   Filter,
   Bell,
   Users,
@@ -34,12 +33,9 @@ import {
 /* ===================== Theme ===================== */
 const theme = {
   brandDark: "#0E6B43",
-  surface: "#FFFFFF",
   surfaceAlt: "#F5F7FB",
   ink: "#0B0F14",
   border: "#E6EEF0",
-
-  // ألوان البطاقات (ثابتة)
   kpiBlue: "#2563EB",
   kpiYellow: "#F59E0B",
   kpiRed: "#EF4444",
@@ -51,6 +47,11 @@ const pageBg =
 const headerGrad = `linear-gradient(135deg, ${theme.brandDark} 0%, #0B3B3C 60%, ${theme.brandDark} 100%)`;
 
 /* ===================== Helpers ===================== */
+const stripOuterQuotes = (s: string) =>
+  String(s ?? "")
+    .replace(/^[\s"“”'‚‹›«»]+/, "")
+    .replace(/[\s"“”'‚‹›«»]+$/, "");
+
 const toTitle = (s: string) =>
   (s || "")
     .trim()
@@ -88,7 +89,9 @@ const normalize = (s: string) =>
 const firstIcd = (s: string) =>
   String(s || "")
     .split(/[,،;\n|]/)[0]
-    ?.trim();
+    ?.split("(")[0]
+    .trim();
+
 const brief = (s: string, max = 120) => {
   const t = (String(s || "").split(/[\n،,;-]/)[0] || "").trim();
   return t.length > max ? t.slice(0, max) + "…" : t;
@@ -117,6 +120,80 @@ function editDist(a: string, b: string) {
   return dp[a.length][b.length];
 }
 
+/* ========= Power Query ========= */
+type Pq = {
+  doctor?: string;
+  patient?: string;
+  icd?: string;
+  contract?: string;
+  claim?: string;
+  emer?: "Y" | "N";
+  refer?: "Y" | "N";
+  from?: string;
+  to?: string;
+  not?: Record<string, string[]>;
+  free?: string[];
+};
+function parsePowerQuery(raw: string): Pq {
+  const out: Pq = { not: {}, free: [] };
+  const parts = raw.match(/"[^"]+"|\S+/g) || [];
+  const take = (v: string) => v.replace(/^"|"$/g, "");
+  for (const tok of parts) {
+    const neg = tok.startsWith("-");
+    const t = neg ? tok.slice(1) : tok;
+    const [k, ...rest] = t.split(":");
+    const v = take(rest.join(":") || "").trim();
+    const pushNot = (key: string, val: string) => {
+      out.not![key] = out.not![key] || [];
+      out.not![key].push(val);
+    };
+    if (!v) {
+      if (!neg) out.free!.push(t);
+      continue;
+    }
+    switch (k.toLowerCase()) {
+      case "d":
+      case "doctor":
+        neg ? pushNot("doctor", v) : (out.doctor = v);
+        break;
+      case "p":
+      case "patient":
+        neg ? pushNot("patient", v) : (out.patient = v);
+        break;
+      case "icd":
+        neg ? pushNot("icd", v) : (out.icd = v);
+        break;
+      case "c":
+      case "contract":
+        neg ? pushNot("contract", v) : (out.contract = v);
+        break;
+      case "t":
+      case "type":
+        neg ? pushNot("claim", v) : (out.claim = v);
+        break;
+      case "emer":
+        out.emer = v.toUpperCase() === "Y" ? "Y" : "N";
+        break;
+      case "ref":
+        out.refer = v.toUpperCase() === "Y" ? "Y" : "N";
+        break;
+      case "date":
+      case "on":
+        out.from = out.to = v;
+        break;
+      case "from":
+        out.from = v;
+        break;
+      case "to":
+        out.to = v;
+        break;
+      default:
+        neg ? pushNot("free", v) : out.free!.push(t);
+    }
+  }
+  return out;
+}
+
 /* ===================== Types ===================== */
 type MedRow = {
   id?: number | string;
@@ -126,8 +203,8 @@ type MedRow = {
   ICD10CODE: string;
   chief_complaint: string;
   claim_type?: string;
-  refer_ind?: string; // Y/N
-  emer_ind?: string; // Y/N
+  refer_ind?: string;
+  emer_ind?: string;
   contract?: string;
   ai_analysis?: string;
 };
@@ -162,23 +239,44 @@ async function httpGet<T>(path: string, params?: Record<string, string>) {
 }
 
 /* ===================== Page ===================== */
+type CtxMode = "" | "doctor" | "icd" | "patient";
+type ChartMode = "byDoctorGlobal" | "byPatientForDoctor" | "byDoctorForPatient";
+
 export default function MedicalRecords() {
   const navigate = useNavigate();
 
-  const [loading, setLoading] = useState(false);
+  // === 1) Loading control to avoid "no data" flash
+  const [loading, setLoading] = useState(true);
+  const [firstLoadDone, setFirstLoadDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // البيانات لبطاقات/قائمة السجلات
+  // table/cards
   const [rows, setRows] = useState<MedRow[]>([]);
-  // بيانات الشارت (قد تكون أوسع من rows لتجنّب تصفية الطبيب)
+  // chart base
   const [chartRows, setChartRows] = useState<MedRow[]>([]);
 
-  // بحث/اقتراح
+  // === Master store (unfiltered) for static filter lists
+  const [masterAll, setMasterAll] = useState<MedRow[]>([]);
+  const [masterPatientsByDoctor, setMasterPatientsByDoctor] = useState<
+    Record<string, string[]>
+  >({});
+  const [masterDoctorsByPatient, setMasterDoctorsByPatient] = useState<
+    Record<string, string[]>
+  >({});
+
+  // masters for suggestions
+  const [allDoctors, setAllDoctors] = useState<string[]>([]);
+  const [allPatients, setAllPatients] = useState<string[]>([]);
+  const [allIcds, setAllIcds] = useState<string[]>([]);
+
+  // context
+  const [ctxMode, setCtxMode] = useState<CtxMode>("");
+  const [ctxPatients, setCtxPatients] = useState<string[]>([]);
+  const [ctxDoctors, setCtxDoctors] = useState<string[]>([]);
+
+  // search UI
   const [q, setQ] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
-  const [doctors, setDoctors] = useState<string[]>([]);
-  const [patients, setPatients] = useState<string[]>([]);
-  const [icds, setIcds] = useState<string[]>([]);
   const [recent, setRecent] = useState<string[]>(
     (() => {
       try {
@@ -191,27 +289,95 @@ export default function MedicalRecords() {
   const [showSuggest, setShowSuggest] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
 
-  // فلاتر
-  const [dateFrom, setDateFrom] = useState<string>(""); // سنرسل واحدًا فقط للباك-إند (انظر fetchData)
+  // filters
+  const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
   const [fDoctor, setFDoctor] = useState<string>("");
   const [fPatient, setFPatient] = useState<string>("");
 
-  // شارت
-  const [selectedDoctor, setSelectedDoctor] = useState<string>("");
+  // ICD filter
+  const [selIcd, setSelIcd] = useState<string>("");
 
-  // مراجع
+  // chart selection highlight
+  const [selectedName, setSelectedName] = useState<string>("");
+
+  // refs
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestRef = useRef<HTMLDivElement>(null);
 
-  /* ============ Boot: جلب أولي ============ */
+  const singleDate = useMemo(
+    () => dateFrom || dateTo || "",
+    [dateFrom, dateTo]
+  );
+
+  /* ============ Boot: load master (unfiltered) once ============ */
   useEffect(() => {
-    fetchData(); // للبطاقات/القائمة
-    fetchChartData(); // للشارت (بدون فلتر الطبيب)
+    (async () => {
+      try {
+        // Load everything without filters (for stable lists)
+        const data = await httpGet<RecordsResponse>(ENDPOINTS.records, {});
+        const list = (data.records || []).map((r, i) => ({
+          id: r.id ?? i + 1,
+          ...r,
+        }));
+        setMasterAll(list);
+
+        // Build suggestion pools
+        const d = new Set<string>(),
+          p = new Set<string>(),
+          i = new Set<string>();
+        list.forEach((r) => {
+          const dn = toTitle(r.doctor_name);
+          if (dn && dn.toLowerCase() !== "nan") d.add(dn);
+          const pn = toTitle(r.patient_name);
+          if (pn && pn.toLowerCase() !== "nan") p.add(pn);
+          const ic = firstIcd(r.ICD10CODE);
+          if (ic) i.add(ic);
+        });
+        const allD = Array.from(d).sort();
+        const allP = Array.from(p).sort();
+        const allI = Array.from(i).sort();
+        setAllDoctors(allD);
+        setAllPatients(allP);
+        setAllIcds(allI);
+
+        // Build master relation maps
+        const mapPatByDoc: Record<string, Set<string>> = {};
+        const mapDocByPat: Record<string, Set<string>> = {};
+        list.forEach((r) => {
+          const doc = toTitle(r.doctor_name);
+          const pat = toTitle(r.patient_name);
+          if (doc && doc.toLowerCase() !== "nan") {
+            mapPatByDoc[doc] = mapPatByDoc[doc] || new Set<string>();
+            if (pat && pat.toLowerCase() !== "nan") mapPatByDoc[doc].add(pat);
+          }
+          if (pat && pat.toLowerCase() !== "nan") {
+            mapDocByPat[pat] = mapDocByPat[pat] || new Set<string>();
+            if (doc && doc.toLowerCase() !== "nan") mapDocByPat[pat].add(doc);
+          }
+        });
+        const patByDoc: Record<string, string[]> = {};
+        const docByPat: Record<string, string[]> = {};
+        Object.entries(mapPatByDoc).forEach(
+          ([k, v]) => (patByDoc[k] = Array.from(v).sort())
+        );
+        Object.entries(mapDocByPat).forEach(
+          ([k, v]) => (docByPat[k] = Array.from(v).sort())
+        );
+        setMasterPatientsByDoctor(patByDoc);
+        setMasterDoctorsByPatient(docByPat);
+      } catch (e: any) {
+        console.error(e);
+      } finally {
+        // trigger first filtered fetch after master loads
+        fetchData();
+        fetchChartData();
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ============ إغلاق اقتراحات عند الضغط خارجًا ============ */
+  /* ============ Close suggestions on outside click ============ */
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (
@@ -224,23 +390,18 @@ export default function MedicalRecords() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  /* ============ جلب من الخادم ============ */
-  // تاريخ واحد فقط لأن الباك-إند يدعم "date" فقط
-  const singleDate = useMemo(
-    () => dateFrom || dateTo || "",
-    [dateFrom, dateTo]
-  );
-
+  /* ============ Fetch (filtered) ============ */
   async function fetchData(opts?: { keepLoading?: boolean }) {
     try {
       if (!opts?.keepLoading) setLoading(true);
       setErr(null);
-      // نرسل q فقط عندما قام المستخدم بالبحث
+
       const params: Record<string, string> = {};
       if (hasSearched && q.trim()) params.q = q.trim();
       if (fDoctor) params.doctor = fDoctor;
       if (fPatient) params.patient = fPatient;
       if (singleDate) params.date = singleDate;
+      if (selIcd) params.icd = selIcd;
 
       const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
       const list = (data?.records || []).map((r, i) => ({
@@ -248,35 +409,22 @@ export default function MedicalRecords() {
         ...r,
       }));
       setRows(list);
-
-      // بناء اقتراحات من نتائج آخر جلب
-      const docSet = new Set<string>();
-      const patSet = new Set<string>();
-      const icdSet = new Set<string>();
-      list.forEach((r) => {
-        const dn = toTitle(r.doctor_name);
-        if (dn && dn.toLowerCase() !== "nan") docSet.add(dn);
-        const pn = toTitle(r.patient_name);
-        if (pn && pn.toLowerCase() !== "nan") patSet.add(pn);
-        const icd = firstIcd(r.ICD10CODE);
-        if (icd) icdSet.add(icd);
-      });
-      setDoctors(Array.from(docSet).sort());
-      setPatients(Array.from(patSet).sort());
-      setIcds(Array.from(icdSet).sort());
     } catch (e: any) {
       setErr(e?.message || "تعذّر تحميل البيانات");
     } finally {
-      if (!opts?.keepLoading) setLoading(false);
+      setLoading(false);
+      setFirstLoadDone(true);
     }
   }
 
-  // جلب للشارت: لا نرسل doctor حتى عند اختياره (حتى تُخفَّت الأعمدة فقط)
   async function fetchChartData() {
     try {
       const params: Record<string, string> = {};
-      if (fPatient) params.patient = fPatient; // في وضع المريض، الشارت يعكس أطباء هذا المريض فقط
+      if (hasSearched && q.trim()) params.q = q.trim();
+      if (fPatient) params.patient = fPatient;
       if (singleDate) params.date = singleDate;
+      if (selIcd) params.icd = selIcd;
+
       const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
       const list = (data?.records || []).map((r, i) => ({
         id: r.id ?? i + 1,
@@ -284,75 +432,216 @@ export default function MedicalRecords() {
       }));
       setChartRows(list);
     } catch {
-      // لا شيء
+      /* noop */
     }
   }
 
-  // أي تغيير على الطبيب/المريض/التاريخ يعيد الجلب (فوري)
   useEffect(() => {
     fetchData();
     fetchChartData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fDoctor, fPatient, singleDate]);
+  }, [fDoctor, fPatient, singleDate, selIcd, hasSearched, q]);
 
-  /* ============ البحث النصّي مع Enter ============ */
-  const qAsPatient = useMemo(() => {
-    const s = toTitle(q.trim());
-    return s && patients.includes(s) ? s : "";
-  }, [q, patients]);
+  /* ============ Build context lists using MASTER maps ============ */
+  useEffect(() => {
+    if (!hasSearched) {
+      setCtxMode("");
+      setCtxPatients([]);
+      setCtxDoctors([]);
+      return;
+    }
 
-  function runSearch() {
-    if (!q.trim()) return;
+    if (fDoctor) {
+      // use master map so list stays static
+      setCtxMode("doctor");
+      setCtxPatients(masterPatientsByDoctor[fDoctor] || []);
+      setCtxDoctors([]);
+      return;
+    }
+
+    if (fPatient) {
+      setCtxMode("patient");
+      setCtxDoctors(masterDoctorsByPatient[fPatient] || []);
+      setCtxPatients([]);
+      return;
+    }
+
+    const qTitle = toTitle(q.trim());
+    const icdExact = allIcds.includes(firstIcd(qTitle) || "");
+    if (icdExact) {
+      // for ICD we can still show all doctors who ever had that ICD (from master)
+      const docs = Array.from(
+        new Set(
+          masterAll
+            .filter((r) => firstIcd(r.ICD10CODE) === firstIcd(qTitle))
+            .map((r) => toTitle(r.doctor_name))
+            .filter(Boolean)
+        )
+      ).sort();
+      setCtxMode("icd");
+      setCtxDoctors(docs);
+      setCtxPatients([]);
+      return;
+    }
+
+    setCtxMode("");
+    setCtxPatients([]);
+    setCtxDoctors([]);
+  }, [
+    hasSearched,
+    fDoctor,
+    fPatient,
+    q,
+    allIcds,
+    masterAll,
+    masterPatientsByDoctor,
+    masterDoctorsByPatient,
+  ]);
+
+  /* ============ Search logic ============ */
+  function runSearch(qOverride?: string, prettyText?: string) {
+    const text = stripOuterQuotes((qOverride ?? q).trim());
+    if (!text) return;
+
+    const pq = parsePowerQuery(text);
+    const titledDoctor = pq.doctor ? toTitle(pq.doctor) : "";
+    const titledPatient = pq.patient ? toTitle(pq.patient) : "";
+    let icdToken = pq.icd ? firstIcd(pq.icd) : "";
+
+    const resolveFreeDoctor = () => {
+      const key = normalize(text);
+      const exact = allDoctors.find((d) => normalize(d) === key);
+      const contains = allDoctors.filter((d) => normalize(d).includes(key));
+      if (exact) return exact;
+      if (contains.length === 1 && key.length >= 2) return contains[0];
+      return "";
+    };
+    const resolveFreePatient = () => {
+      const key = normalize(text);
+      const exact = allPatients.find((p) => normalize(p) === key);
+      const contains = allPatients.filter((p) => normalize(p).includes(key));
+      if (exact) return exact;
+      if (contains.length === 1 && key.length >= 2) return contains[0];
+      return "";
+    };
+    const resolveFreeIcd = () => {
+      const key = normalize(firstIcd(text));
+      const exact = allIcds.find((i) => normalize(i) === key);
+      const contains = allIcds.filter((i) => normalize(i).includes(key));
+      if (exact) return exact;
+      if (contains.length === 1 && key.length >= 2) return contains[0];
+      return "";
+    };
+
+    // doctor
+    if (titledDoctor) {
+      const full = allDoctors.find((d) =>
+        normalize(d).includes(normalize(titledDoctor))
+      );
+      const finalDoc = full || titledDoctor;
+      setFDoctor(finalDoc);
+    } else {
+      const uniqueDoc = resolveFreeDoctor();
+      setFDoctor(uniqueDoc || "");
+    }
+
+    // patient
+    if (titledPatient) {
+      setFPatient(titledPatient);
+    } else if (!titledDoctor) {
+      const uniquePat = resolveFreePatient();
+      setFPatient(uniquePat || "");
+    }
+
+    // dates
+    if (pq.from && !pq.to) {
+      setDateFrom(pq.from);
+      setDateTo("");
+    } else if (pq.to && !pq.from) {
+      setDateFrom("");
+      setDateTo(pq.to);
+    } else if (pq.from && pq.to) {
+      setDateFrom(pq.from);
+      setDateTo(pq.to);
+    }
+
+    // ICD
+    if (!icdToken) icdToken = resolveFreeIcd();
+    setSelIcd(icdToken || "");
+
+    // free text
+    const free = [icdToken, pq.contract, pq.claim, ...(pq.free || [])]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+
     setHasSearched(true);
-    const newRecent = [q.trim(), ...recent.filter((x) => x !== q.trim())].slice(
-      0,
-      10
-    );
-    setRecent(newRecent);
-    localStorage.setItem("medical_recent", JSON.stringify(newRecent));
-    if (patients.includes(toTitle(q.trim()))) setFPatient(toTitle(q.trim()));
-    fetchData(); // جلب مع q
-    fetchChartData(); // الشارت لا يرسل q
+
+    if (qOverride) setQ(stripOuterQuotes(prettyText || text));
+    else setQ(stripOuterQuotes(free ? free : text));
+
+    // history
+    const shown = stripOuterQuotes(prettyText || (free ? free : text));
+    if (shown.trim()) {
+      const newRecent = [shown, ...recent.filter((x) => x !== shown)].slice(
+        0,
+        10
+      );
+      setRecent(newRecent);
+      localStorage.setItem("medical_recent", JSON.stringify(newRecent));
+    }
+
+    fetchData();
+    fetchChartData();
     setShowSuggest(false);
   }
 
-  /* ============ KPI ============ */
-  const kpis = useMemo(() => {
-    const list = rows;
-    const byDoc: Record<string, number> = {};
-    const patSet = new Set<string>();
-    let alerts = 0;
-    list.forEach((r) => {
-      const n = firstNameOf(r.doctor_name || "");
-      if (n && n.toLowerCase() !== "nan") byDoc[n] = (byDoc[n] ?? 0) + 1;
-      const pn = toTitle(r.patient_name);
-      if (pn && pn.toLowerCase() !== "nan") patSet.add(pn);
-      if (
-        (r.emer_ind || "").toUpperCase() === "Y" ||
-        (r.refer_ind || "").toUpperCase() === "Y"
-      )
-        alerts++;
-    });
-    return {
-      total: list.length,
-      doctors: Object.keys(byDoc).length,
-      patients: patSet.size,
-      alerts,
-    };
-  }, [rows]);
+  /* ============ Chart ============ */
+  const chartMode: ChartMode = useMemo(() => {
+    if (fDoctor) return "byPatientForDoctor";
+    if (fPatient) return "byDoctorForPatient";
+    return "byDoctorGlobal";
+  }, [fDoctor, fPatient]);
 
-  /* ============ Chart Data ============ */
+  useEffect(() => {
+    if (!hasSearched) setSelectedName("");
+  }, [chartMode, hasSearched]);
+
   const chartData = useMemo(() => {
+    const base =
+      fPatient || fDoctor || singleDate || selIcd
+        ? rows
+        : chartRows.length
+        ? chartRows
+        : rows;
+
     const by: Record<string, number> = {};
-    (chartRows.length ? chartRows : rows).forEach((r) => {
-      const fn = firstNameOf(r.doctor_name || "");
-      if (!fn || fn.toLowerCase() === "nan") return;
-      by[fn] = (by[fn] ?? 0) + 1;
-    });
+    if (chartMode === "byPatientForDoctor") {
+      base.forEach((r) => {
+        if (toTitle(r.doctor_name) !== fDoctor) return;
+        const key = toTitle(r.patient_name || "").trim();
+        if (!key || key.toLowerCase() === "nan") return;
+        by[key] = (by[key] ?? 0) + 1;
+      });
+    } else if (chartMode === "byDoctorForPatient") {
+      base.forEach((r) => {
+        if (toTitle(r.patient_name) !== fPatient) return;
+        const key = toTitle(r.doctor_name || "").trim();
+        if (!key || key.toLowerCase() === "nan") return;
+        by[key] = (by[key] ?? 0) + 1;
+      });
+    } else {
+      base.forEach((r) => {
+        const key = firstNameOf(r.doctor_name || "");
+        if (!key || key.toLowerCase() === "nan") return;
+        by[key] = (by[key] ?? 0) + 1;
+      });
+    }
+
     return Object.entries(by)
-      .map(([doctor, count]) => ({ doctor, count }))
+      .map(([label, count]) => ({ label, count }))
       .sort((a, b) => b.count - a.count);
-  }, [chartRows, rows]);
+  }, [rows, chartRows, fPatient, fDoctor, singleDate, selIcd, chartMode]);
 
   const yMeta = useMemo(() => {
     const max = chartData.reduce((m, c) => Math.max(m, c.count), 0);
@@ -362,6 +651,14 @@ export default function MedicalRecords() {
     for (let v = 0; v <= top; v += step) ticks.push(v);
     return { ticks, top };
   }, [chartData]);
+
+  const chartTitle = useMemo(() => {
+    if (chartMode === "byPatientForDoctor")
+      return `عدد سجلات الطبيب (${fDoctor}) لكل مريض`;
+    if (chartMode === "byDoctorForPatient")
+      return `عدد سجلات المريض (${fPatient}) لكل طبيب`;
+    return "عدد السجلات لكل طبيب";
+  }, [chartMode, fDoctor, fPatient]);
 
   /* ===================== UI ===================== */
   return (
@@ -402,7 +699,7 @@ export default function MedicalRecords() {
                 sessionStorage.removeItem("haseef_auth");
                 navigate("/");
               }}
-              className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg-black/5"
+              className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg:black/5"
             >
               <span className="text-black/80">تسجيل الخروج</span>
               <LogOut className="size-4" />
@@ -431,123 +728,170 @@ export default function MedicalRecords() {
               السجلات الطبية
             </div>
             <div className="text-white/90 text-sm mt-1">
-              اكتبي حرفًا أو كلمة؛ مثل <b>M</b> لعرض كل ما يبدأ بـ <b>M</b>. ثم
-              Enter.
+              للمختصّين: يمكن استخدام الصياغة المختصرة مثل{" "}
+              <b>d:Mohamed p:Yosef icd:E11 from:2025-01-01 to:2025-01-31</b> أو
+              استخدموا البحث العادي ثم Enter.
             </div>
 
             {/* Search */}
             <SearchBar
               q={q}
-              setQ={setQ}
+              setQ={(v) => setQ(stripOuterQuotes(v))}
               setHasSearched={setHasSearched}
               suggestRef={suggestRef}
               inputRef={inputRef}
-              suggestItems={buildSuggestItems(q, doctors, patients, icds)}
-              didYouMean={didYouMean(q, doctors, patients, icds)}
+              suggestItems={useMemo(() => {
+                const key = normalize(q);
+                const pool: {
+                  label: string;
+                  kind: "doctor" | "patient" | "icd" | "text";
+                }[] = [];
+                allDoctors.forEach((d) =>
+                  pool.push({ label: d, kind: "doctor" })
+                );
+                allPatients.forEach((p) =>
+                  pool.push({ label: p, kind: "patient" })
+                );
+                allIcds.forEach((i) => pool.push({ label: i, kind: "icd" }));
+                if (!key) return pool.slice(0, 8);
+                const starts = pool.filter((s) =>
+                  normalize(s.label).startsWith(key)
+                );
+                const contains = pool.filter(
+                  (s) =>
+                    !normalize(s.label).startsWith(key) &&
+                    normalize(s.label).includes(key)
+                );
+                const out = [...starts.slice(0, 6), ...contains.slice(0, 4)];
+                return out.slice(0, 8);
+              }, [q, allDoctors, allPatients, allIcds])}
+              didYouMean={useMemo(() => {
+                const key = normalize(q);
+                if (!key || key.length < 3) return "";
+                const candidates = [...allDoctors, ...allPatients, ...allIcds];
+                let best = "",
+                  bestDist = Infinity;
+                candidates.forEach((c) => {
+                  const d = editDist(normalize(c), key);
+                  if (d < bestDist) {
+                    best = c;
+                    bestDist = d;
+                  }
+                });
+                return bestDist > 0 &&
+                  bestDist <= Math.max(3, Math.floor(key.length * 0.5))
+                  ? best
+                  : "";
+              }, [q, allDoctors, allPatients, allIcds])}
               recent={recent}
               setRecent={setRecent}
-              onRunSearch={runSearch}
+              onRunSearch={(o?: string, p?: string) => runSearch(o, p)}
               setShowSuggest={setShowSuggest}
               showSuggest={showSuggest}
               activeIdx={activeIdx}
               setActiveIdx={setActiveIdx}
             />
 
-            {/* Filters row */}
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              {/* Date range (واجهة فقط، الخادم يستقبل تاريخًا واحدًا) */}
-              <div className="flex items-center gap-1 bg-white/10 rounded-2xl px-2 py-1">
-                <div
-                  className="flex items-center gap-2 bg-white rounded-xl px-3 py-1"
-                  style={{ border: "1px solid transparent" }}
-                >
-                  <CalendarDays className="size-4 text-black/70" />
-                  <input
-                    type="date"
-                    value={dateFrom}
-                    onChange={(e) => setDateFrom(e.target.value)}
-                    className="h-9 bg-transparent outline-none text-[13px] text-black"
-                    title="من تاريخ"
-                  />
-                  <span className="text-black/50 text-xs">إلى</span>
-                  <input
-                    type="date"
-                    value={dateTo}
-                    onChange={(e) => setDateTo(e.target.value)}
-                    className="h-9 bg-transparent outline-none text-[13px] text-black"
-                    title="إلى تاريخ"
-                  />
-                </div>
-              </div>
-
-              {/* Chatbot */}
-              <button
-                onClick={() =>
-                  navigate("/chat", {
-                    state: {
-                      query: q,
-                      date: singleDate,
-                      doctor: fDoctor,
-                      patient: fPatient || qAsPatient,
-                    },
-                  })
-                }
-                className="h-10 px-4 rounded-xl text-sm font-semibold shadow-md transition"
-                style={{ background: "#A7F3D0", color: theme.brandDark }}
-                title="المساعد الذكي"
-              >
-                <span className="inline-flex items-center gap-1">
-                  <Bot className="size-4" /> المساعد الذكي
-                </span>
-              </button>
-
-              {/* Quick Filters */}
-              <div
-                className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border text-black"
-                style={{ borderColor: theme.border }}
-              >
-                <Filter className="size-4 text-black/70" />
-                <span className="text-sm">فلترة:</span>
-
-                {/* Doctor */}
-                <SelectWithArrow
-                  value={fDoctor}
-                  onChange={(v) => {
-                    setFDoctor(v);
-                    setSelectedDoctor(v || "");
-                  }}
-                  title="حسب الطبيب"
-                  placeholder="كل الأطباء"
-                  options={doctors}
-                />
-
-                {/* Patient */}
-                <SelectWithArrow
-                  value={fPatient}
-                  onChange={(v) => setFPatient(v)}
-                  title="حسب المريض"
-                  placeholder="كل المرضى"
-                  options={patients}
-                />
-
-                {(fDoctor || fPatient || dateFrom || dateTo) && (
-                  <button
-                    onClick={() => {
-                      setFDoctor("");
-                      setFPatient("");
-                      setDateFrom("");
-                      setDateTo("");
-                      setSelectedDoctor("");
-                    }}
-                    className="h-9 px-3 rounded-lg text-sm border hover:bg-black/5 text-black"
-                    style={{ borderColor: theme.border }}
-                    title="إزالة جميع الفلاتر"
+            {/* Filters */}
+            {hasSearched && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {/* Date controls */}
+                <div className="flex items-center gap-1 bg-white/10 rounded-2xl px-2 py-1">
+                  <div
+                    className="flex items-center gap-2 bg-white rounded-xl px-3 py-1"
+                    style={{ border: "1px solid transparent" }}
                   >
-                    إعادة التعيين
-                  </button>
+                    <CalendarDays className="size-4 text-black/70" />
+                    <input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="h-9 bg-transparent outline-none text-[13px] text-black"
+                      title="من تاريخ"
+                    />
+                    <span className="text-black/50 text-xs">إلى</span>
+                    <input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className="h-9 bg-transparent outline-none text-[13px] text-black"
+                      title="إلى تاريخ"
+                    />
+                  </div>
+                </div>
+
+                {(ctxMode === "doctor" ||
+                  ctxMode === "icd" ||
+                  ctxMode === "patient") && (
+                  <div
+                    className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border text-black"
+                    style={{ borderColor: theme.border }}
+                  >
+                    <Filter className="size-4 text:black/70" />
+                    <span className="text-sm">فلترة:</span>
+
+                    {ctxMode === "doctor" && (
+                      <SelectWithArrow
+                        value={fPatient}
+                        onChange={(v) => {
+                          setFPatient(v);
+                          setSelectedName("");
+                        }}
+                        title="حسب المريض"
+                        placeholder="كل المرضى"
+                        // STATIC list from master map, never shrinks
+                        options={masterPatientsByDoctor[fDoctor] || []}
+                      />
+                    )}
+
+                    {ctxMode === "icd" && (
+                      <SelectWithArrow
+                        value={fDoctor}
+                        onChange={(v) => {
+                          setFDoctor(v);
+                          setSelectedName("");
+                        }}
+                        title="حسب الطبيب"
+                        placeholder="كل الأطباء"
+                        options={ctxDoctors /* ok for ICD */}
+                      />
+                    )}
+
+                    {ctxMode === "patient" && (
+                      <SelectWithArrow
+                        value={fDoctor}
+                        onChange={(v) => {
+                          setFDoctor(v);
+                          setSelectedName("");
+                        }}
+                        title="حسب الطبيب"
+                        placeholder="كل الأطباء"
+                        // STATIC list from master map, never shrinks
+                        options={masterDoctorsByPatient[fPatient] || []}
+                      />
+                    )}
+
+                    {(fDoctor || fPatient || dateFrom || dateTo || selIcd) && (
+                      <button
+                        onClick={() => {
+                          setFDoctor("");
+                          setFPatient("");
+                          setDateFrom("");
+                          setDateTo("");
+                          setSelectedName("");
+                          setSelIcd("");
+                        }}
+                        className="h-9 px-3 rounded-lg text-sm border hover:bg-black/5 text-black"
+                        style={{ borderColor: theme.border }}
+                        title="إزالة جميع الفلاتر"
+                      >
+                        إعادة التعيين
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
+            )}
           </div>
 
           {/* Errors / skeleton */}
@@ -556,37 +900,39 @@ export default function MedicalRecords() {
               <X className="size-4" /> <span className="text-sm">{err}</span>
             </div>
           )}
-          {loading && rows.length === 0 && (
+
+          {/* Show skeleton until first fetch completes */}
+          {(!firstLoadDone || loading) && rows.length === 0 ? (
             <div className="mt-6 grid gap-4">
               <div className="h-20 bg-white rounded-2xl animate-pulse" />
               <div className="h-80 bg-white rounded-2xl animate-pulse" />
               <div className="h-[460px] bg-white rounded-2xl animate-pulse" />
             </div>
-          )}
+          ) : null}
 
           {/* KPI Cards */}
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <KpiCard
               title="عدد السجلات"
-              value={kpis.total}
+              value={kpis(rows).total}
               color={theme.kpiBlue}
               icon={<ClipboardList className="size-5" />}
             />
             <KpiCard
               title="عدد الأطباء"
-              value={kpis.doctors}
+              value={kpis(rows).doctors}
               color={theme.kpiYellow}
               icon={<UserPlus className="size-5" />}
             />
             <KpiCard
               title="عدد المرضى"
-              value={kpis.patients}
+              value={kpis(rows).patients}
               color={theme.kpiRed}
               icon={<Users className="size-5" />}
             />
             <KpiCard
               title="عدد التنبيهات"
-              value={kpis.alerts}
+              value={kpis(rows).alerts}
               color={theme.kpiGreen}
               icon={<Bell className="size-5" />}
             />
@@ -598,29 +944,18 @@ export default function MedicalRecords() {
             style={{ borderColor: theme.border }}
           >
             <div className="mb-3 font-semibold text-neutral-700 flex items-center justify-between">
-              <span>
-                {fPatient || qAsPatient
-                  ? `عدد سجلات المريض (${fPatient || qAsPatient}) لكل طبيب`
-                  : "عدد السجلات لكل طبيب"}
-              </span>
-              {selectedDoctor && (
+              <span>{chartTitle}</span>
+              {selectedName && (
                 <button
                   className="text-xs px-2 py-1 rounded-full border hover:bg-black/5"
                   style={{ borderColor: theme.border }}
-                  onClick={() => setSelectedDoctor("")}
+                  onClick={() => setSelectedName("")}
                 >
-                  إلغاء تمييز الطبيب
+                  إلغاء التمييز
                 </button>
               )}
             </div>
-            <div
-              style={{
-                width: "100%",
-                height: 360,
-                minWidth: 320,
-                minHeight: 200,
-              }}
-            >
+            <div style={{ width: "100%", height: 360, minWidth: 320 }}>
               {chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
@@ -630,7 +965,7 @@ export default function MedicalRecords() {
                     barGap={6}
                     onClick={(e: any) => {
                       const name = e?.activeLabel as string | undefined;
-                      if (name) setSelectedDoctor(name);
+                      if (name) setSelectedName(name);
                     }}
                   >
                     <CartesianGrid
@@ -653,7 +988,7 @@ export default function MedicalRecords() {
                       </linearGradient>
                     </defs>
                     <XAxis
-                      dataKey="doctor"
+                      dataKey="label"
                       tick={{ fontSize: 12, fill: "#374151" }}
                       angle={-15}
                       interval={0}
@@ -678,19 +1013,20 @@ export default function MedicalRecords() {
                       }}
                       formatter={(v: any) => [
                         String(v),
-                        fPatient || qAsPatient ? "سجلات المريض" : "عدد السجلات",
+                        chartMode === "byPatientForDoctor"
+                          ? "سجلات المريض"
+                          : "عدد السجلات",
                       ]}
-                      labelFormatter={(l: any) => `الطبيب: ${l}`}
+                      labelFormatter={(l: any) =>
+                        chartMode === "byPatientForDoctor"
+                          ? `المريض: ${l}`
+                          : `الطبيب: ${l}`
+                      }
                     />
-                    <Bar
-                      dataKey="count"
-                      barSize={44}
-                      radius={[12, 12, 8, 8]}
-                      animationDuration={250}
-                    >
+                    <Bar dataKey="count" barSize={44} radius={[12, 12, 8, 8]}>
                       {chartData.map((d, i) => {
                         const active =
-                          !selectedDoctor || selectedDoctor === d.doctor;
+                          !selectedName || selectedName === d.label;
                         return (
                           <Cell
                             key={`cell-${i}`}
@@ -711,16 +1047,20 @@ export default function MedicalRecords() {
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full grid place-items-center text-neutral-500 text-sm">
-                  لا توجد بيانات
-                </div>
+                // ONLY show "no data" after first load is done and not loading
+                firstLoadDone &&
+                !loading && (
+                  <div className="h-full grid place-items-center text-neutral-500 text-sm">
+                    لا توجد بيانات
+                  </div>
+                )
               )}
             </div>
           </div>
 
           {/* Cards */}
           <div className="mt-6 grid grid-cols-1 gap-4 print:gap-2">
-            {rows.length === 0 && !loading ? (
+            {firstLoadDone && !loading && rows.length === 0 ? (
               <div
                 className="h-[160px] grid place-items-center text-neutral-500 text-sm border rounded-2xl bg-white"
                 style={{ borderColor: theme.border }}
@@ -740,6 +1080,30 @@ export default function MedicalRecords() {
       </div>
     </div>
   );
+}
+
+/* ===================== Derived: KPIs ===================== */
+function kpis(list: MedRow[]) {
+  const byDoc: Record<string, number> = {};
+  const patSet = new Set<string>();
+  let alerts = 0;
+  list.forEach((r) => {
+    const n = firstNameOf(r.doctor_name || "");
+    if (n && n.toLowerCase() !== "nan") byDoc[n] = (byDoc[n] ?? 0) + 1;
+    const pn = toTitle(r.patient_name);
+    if (pn && pn.toLowerCase() !== "nan") patSet.add(pn);
+    if (
+      (r.emer_ind || "").toUpperCase() === "Y" ||
+      (r.refer_ind || "").toUpperCase() === "Y"
+    )
+      alerts++;
+  });
+  return {
+    total: list.length,
+    doctors: Object.keys(byDoc).length,
+    patients: patSet.size,
+    alerts,
+  };
 }
 
 /* ===================== Sub Components ===================== */
@@ -770,7 +1134,6 @@ function SideItem({
   );
 }
 
-/* ===== بطاقة KPI بتدرّج فاتح + الأيقونة في الجهة المقابلة، وبدون (...) ===== */
 function KpiCard({
   title,
   value,
@@ -788,14 +1151,11 @@ function KpiCard({
       className="relative rounded-2xl text-white p-4 overflow-hidden shadow-soft"
       style={{ background: grad }}
     >
-      {/* كبسولة الأيقونة (بالجهة الأخرى) */}
       <div className="absolute top-3 left-3">
         <div className="w-10 h-10 rounded-xl bg-white/25 backdrop-blur-sm grid place-items-center">
           {icon}
         </div>
       </div>
-
-      {/* موجة زخرفية فاتحة */}
       <svg
         width="140"
         height="46"
@@ -819,7 +1179,6 @@ function KpiCard({
   );
 }
 
-/* ===== عنصر select مع سهم أعلى النص ===== */
 function SelectWithArrow({
   value,
   onChange,
@@ -835,7 +1194,6 @@ function SelectWithArrow({
 }) {
   return (
     <div className="relative">
-      {/* السهم أعلى النص */}
       <svg
         width="10"
         height="6"
@@ -894,7 +1252,7 @@ function RecordCard({ r }: { r: MedRow }) {
 
   return (
     <div
-      className="rounded-2xl border bg-white p-4 shadow-sm print:shadow-none print:p-3 transition-transform duration-150 hover:-translate-y-[2px] hover:shadow-lg relative overflow-hidden"
+      className="rounded-2xl border bg:white p-4 shadow-sm print:shadow-none print:p-3 transition-transform duration-150 hover:-translate-y-[2px] hover:shadow-lg relative overflow-hidden"
       style={{ borderColor: theme.border }}
     >
       <div
@@ -962,7 +1320,6 @@ function Field({
   );
 }
 
-/* ====== SearchBar مُحسّن (مظهر احترافي) ====== */
 function SearchBar(props: {
   q: string;
   setQ: (v: string) => void;
@@ -976,7 +1333,7 @@ function SearchBar(props: {
   didYouMean: string;
   recent: string[];
   setRecent: (v: string[]) => void;
-  onRunSearch: () => void;
+  onRunSearch: (override?: string, prettyText?: string) => void;
   showSuggest: boolean;
   setShowSuggest: (b: boolean) => void;
   activeIdx: number;
@@ -999,12 +1356,36 @@ function SearchBar(props: {
     setActiveIdx,
   } = props;
 
-  const apply = (s: { label: string }) => {
-    setQ(s.label);
+  // Apply suggestion (blur to hide caret)
+  const apply = (s: {
+    label: string;
+    kind: "doctor" | "patient" | "icd" | "text";
+  }) => {
+    const pretty = stripOuterQuotes(s.label);
+    setQ(pretty);
     setHasSearched(true);
+
+    let override = s.label;
+    if (s.kind === "doctor") override = `d:"${s.label}"`;
+    if (s.kind === "patient") override = `p:"${s.label}"`;
+    if (s.kind === "icd") override = `icd:"${firstIcd(s.label) || s.label}"`;
+
+    requestAnimationFrame(() => inputRef.current?.blur()); // hide blinking caret
     setShowSuggest(false);
-    setTimeout(onRunSearch, 0);
+    onRunSearch(override, pretty);
   };
+
+  const clearAll = () => {
+    setQ("");
+    setHasSearched(false);
+    window.dispatchEvent(new CustomEvent("med:clearAll"));
+  };
+
+  useEffect(() => {
+    const handler = () => setShowSuggest(false);
+    window.addEventListener("med:cleared", handler);
+    return () => window.removeEventListener("med:cleared", handler);
+  }, [setShowSuggest]);
 
   return (
     <div className="mt-4 relative" ref={suggestRef}>
@@ -1012,13 +1393,24 @@ function SearchBar(props: {
         <div className="relative w-full">
           <input
             ref={inputRef}
-            value={q}
+            dir="auto"
+            value={stripOuterQuotes(q)}
             onChange={(e) => {
-              setQ(e.target.value);
+              setQ(stripOuterQuotes(e.target.value));
               setShowSuggest(true);
               setActiveIdx(0);
             }}
-            onFocus={() => setShowSuggest(true)}
+            onMouseDown={() => {
+              // 2) Click-to-clear: clear immediately on click to start a fresh search
+              if (stripOuterQuotes(q)) {
+                setQ("");
+                setHasSearched(false);
+              }
+            }}
+            onFocus={() => {
+              setShowSuggest(true);
+              setActiveIdx(0);
+            }}
             onKeyDown={(e) => {
               if (
                 showSuggest &&
@@ -1049,29 +1441,48 @@ function SearchBar(props: {
                 }
               }
               if (e.key === "Enter") onRunSearch();
+              if (e.key === "Escape") clearAll();
             }}
-            className="w-full h-12 rounded-2xl pl-10 pr-4 outline-none placeholder:text-black/60"
+            className="w-full h-12 rounded-2xl pl-10 pr-12 outline-none placeholder:text-black/60"
             style={{
               background: "#F7FAF9",
               border: `1px solid ${theme.border}`,
               boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)",
               color: "#111827",
+              direction: "auto",
+              unicodeBidi: "plaintext",
             }}
-            placeholder="ابحثي باسم طبيب/مريض/ICD/نص حر… ثم Enter"
+            placeholder="اكتب d: أو p: أو icd: لبحث سريع… أو اكتب نصًا ثم Enter"
             aria-label="بحث موحّد"
           />
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/70" />
+          {q && (
+            <button
+              onClick={() => setQ("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-black/50 hover:text-black/80"
+              title="مسح النص"
+            >
+              ×
+            </button>
+          )}
+
           {showSuggest && (
-            <div className="absolute z-50 mt-2 w-full bg-white border rounded-xl shadow-xl">
+            <div
+              className="absolute z-50 mt-2 w-full bg-white border rounded-xl shadow-xl"
+              onMouseDown={(e) => e.preventDefault()}
+            >
               {didYouMean && (
                 <div className="px-3 py-2 text-[12px] text-[#9A4A07] bg-[#FFF6E3] rounded-t-xl">
                   هل تقصدين:{" "}
                   <button
                     className="underline font-semibold"
-                    onClick={() => {
-                      setQ(didYouMean);
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      const pretty = stripOuterQuotes(didYouMean);
+                      setQ(pretty);
                       setShowSuggest(false);
-                      setTimeout(onRunSearch, 0);
+                      requestAnimationFrame(() => inputRef.current?.blur());
+                      onRunSearch(didYouMean, pretty);
                     }}
                   >
                     {didYouMean}
@@ -1090,7 +1501,10 @@ function SearchBar(props: {
                         )}
                         style={{ color: theme.ink }}
                         onMouseEnter={() => setActiveIdx(i)}
-                        onClick={() => apply(s)}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          apply(s);
+                        }}
                         title={s.label}
                       >
                         <span className="truncate">{s.label}</span>
@@ -1122,10 +1536,13 @@ function SearchBar(props: {
                       <button
                         key={r}
                         className="h-7 px-2 rounded-full bg-black/5 text-[12px] hover:bg-black/10"
-                        onClick={() => {
-                          setQ(r);
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          const pretty = stripOuterQuotes(r);
+                          setQ(pretty);
                           setShowSuggest(false);
-                          setTimeout(onRunSearch, 0);
+                          requestAnimationFrame(() => inputRef.current?.blur());
+                          onRunSearch(r, pretty);
                         }}
                         title={r}
                       >
@@ -1138,55 +1555,20 @@ function SearchBar(props: {
             </div>
           )}
         </div>
+
+        <button
+          onClick={() => onRunSearch()}
+          className="h-12 px-4 rounded-xl text-sm font-semibold shadow-md border"
+          style={{
+            background: "#A7F3D0",
+            color: "#0E6B43",
+            borderColor: "transparent",
+          }}
+          title="بحث"
+        >
+          بحث
+        </button>
       </div>
     </div>
   );
-}
-
-/* ======= Utils لبناء الاقتراحات وDidYouMean ======= */
-function buildSuggestItems(
-  q: string,
-  doctors: string[],
-  patients: string[],
-  icds: string[]
-) {
-  const key = normalize(q);
-  const pool: { label: string; kind: "doctor" | "patient" | "icd" | "text" }[] =
-    [];
-  doctors.forEach((d) => pool.push({ label: d, kind: "doctor" }));
-  patients.forEach((p) => pool.push({ label: p, kind: "patient" }));
-  icds.forEach((i) => pool.push({ label: i, kind: "icd" }));
-
-  if (!key) return pool.slice(0, 8);
-
-  const starts = pool.filter((s) => normalize(s.label).startsWith(key));
-  const contains = pool.filter(
-    (s) =>
-      !normalize(s.label).startsWith(key) && normalize(s.label).includes(key)
-  );
-  const out = [...starts.slice(0, 6), ...contains.slice(0, 4)];
-  return out.slice(0, 8);
-}
-
-function didYouMean(
-  q: string,
-  doctors: string[],
-  patients: string[],
-  icds: string[]
-) {
-  const key = normalize(q);
-  if (!key || key.length < 3) return "";
-  const candidates = [...doctors, ...patients, ...icds];
-  let best = "",
-    bestDist = Infinity;
-  candidates.forEach((c) => {
-    const d = editDist(normalize(c), key);
-    if (d < bestDist) {
-      best = c;
-      bestDist = d;
-    }
-  });
-  return bestDist > 0 && bestDist <= Math.max(3, Math.floor(key.length * 0.5))
-    ? best
-    : "";
 }
