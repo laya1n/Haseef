@@ -61,7 +61,7 @@ export default function Home() {
         </p>
 
         <Link
-          to="/medicalRecords"
+          to="/dashboard"
           className="inline-block mt-6 px-6 py-3 rounded-xl bg-[#92E3A9] text-[#112F2A] font-semibold hover:bg-[#7ED8A0] transition"
         >
           لوحة المتابعة
@@ -81,7 +81,7 @@ export default function Home() {
               تحليل سلوك الأطباء والتشخيصات للكشف عن الأنماط غير الطبيعية.
             </p>
             <Link
-              to="/medicalRecords"
+              to="/dashboard"
               className="text-sm font-medium bg-[#92E3A9] text-[#112F2A] px-4 py-2 rounded-lg hover:bg-[#7ED8A0] transition"
             >
               اذهب للوحة الأنماط →

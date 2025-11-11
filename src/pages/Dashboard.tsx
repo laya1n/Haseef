@@ -11,9 +11,12 @@ import {
   Shield,
   History,
   CalendarDays,
-  Upload,
   Bot,
   Filter,
+  Bell,
+  Users,
+  UserPlus,
+  ClipboardList,
 } from "lucide-react";
 import clsx from "clsx";
 import {
@@ -25,24 +28,27 @@ import {
   ResponsiveContainer,
   CartesianGrid,
   LabelList,
+  Cell,
 } from "recharts";
 
-/* ===================== Theme (ألوان قوية ورسمية) ===================== */
+/* ===================== Theme ===================== */
 const theme = {
-  deep: "#0E6B43", // أخضر رسمي (مطابق للشعار)
-  deep2: "#0B3B3C", // أعمق للعناوين/الأزرار
-  accent: "#97FC4A", // إبراز
-  blue: "#0D16D1",
-  mint: "#8ADE9D",
-  mintSoft: "#EAF7F0",
+  brandDark: "#0E6B43",
   surface: "#FFFFFF",
   surfaceAlt: "#F5F7FB",
+  ink: "#0B0F14",
   border: "#E6EEF0",
-  ink: "#0B0F14", // أسود قوي (لقائمة الاقتراحات)
-  inkMuted: "#475569",
+
+  // ألوان البطاقات (ثابتة)
+  kpiBlue: "#2563EB",
+  kpiYellow: "#F59E0B",
+  kpiRed: "#EF4444",
+  kpiGreen: "#10B981",
 };
-const gradientHeader = `linear-gradient(135deg, ${theme.deep} 0%, ${theme.deep2} 55%, ${theme.deep} 100%)`;
-const pageBg = `linear-gradient(180deg,#F5F9F7 0%,#ECF5F2 100%), radial-gradient(800px 500px at 12% 8%, ${theme.mintSoft} 0%, transparent 60%)`;
+
+const pageBg =
+  "linear-gradient(180deg,#F5F9F7 0%,#ECF5F2 100%), radial-gradient(800px 500px at 12% 8%, rgba(169,222,214,0.18) 0%, transparent 60%)";
+const headerGrad = `linear-gradient(135deg, ${theme.brandDark} 0%, #0B3B3C 60%, ${theme.brandDark} 100%)`;
 
 /* ===================== Helpers ===================== */
 const toTitle = (s: string) =>
@@ -83,12 +89,12 @@ const firstIcd = (s: string) =>
   String(s || "")
     .split(/[,،;\n|]/)[0]
     ?.trim();
-const brief = (s: string, max = 56) => {
+const brief = (s: string, max = 120) => {
   const t = (String(s || "").split(/[\n،,;-]/)[0] || "").trim();
   return t.length > max ? t.slice(0, max) + "…" : t;
 };
 
-// Levenshtein (للتصحيح الإملائي)
+// Levenshtein
 function editDist(a: string, b: string) {
   a = normalize(a);
   b = normalize(b);
@@ -138,7 +144,6 @@ const API_BASE = String(RAW_BASE || "");
 const USE_PROXY = !API_BASE;
 const ENDPOINTS = {
   records: USE_PROXY ? "/api/medical/records" : "/medical/records",
-  upload: USE_PROXY ? "/api/medical/upload" : "/medical/upload",
 };
 const joinUrl = (b: string, p: string) =>
   b ? `${b.replace(/\/$/, "")}${p.startsWith("/") ? p : `/${p}`}` : p;
@@ -156,23 +161,6 @@ async function httpGet<T>(path: string, params?: Record<string, string>) {
   return r.json() as Promise<T>;
 }
 
-async function httpUpload(path: string, file: File) {
-  const full = joinUrl(API_BASE, path);
-  const form = new FormData();
-  form.append("file", file);
-  const r = await fetch(full, {
-    method: "POST",
-    body: form,
-    credentials: "include",
-  });
-  if (!r.ok) throw new Error(await r.text());
-  try {
-    return await r.json();
-  } catch {
-    return { ok: true };
-  }
-}
-
 /* ===================== Page ===================== */
 export default function MedicalRecords() {
   const navigate = useNavigate();
@@ -180,14 +168,14 @@ export default function MedicalRecords() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // بيانات خام من الخادم
+  // البيانات لبطاقات/قائمة السجلات
   const [rows, setRows] = useState<MedRow[]>([]);
+  // بيانات الشارت (قد تكون أوسع من rows لتجنّب تصفية الطبيب)
+  const [chartRows, setChartRows] = useState<MedRow[]>([]);
 
-  // بحث نصّي
+  // بحث/اقتراح
   const [q, setQ] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
-
-  // اقتراحات
   const [doctors, setDoctors] = useState<string[]>([]);
   const [patients, setPatients] = useState<string[]>([]);
   const [icds, setIcds] = useState<string[]>([]);
@@ -203,208 +191,168 @@ export default function MedicalRecords() {
   const [showSuggest, setShowSuggest] = useState(false);
   const [activeIdx, setActiveIdx] = useState(0);
 
-  // فلاتر إضافية
-  const [dateFrom, setDateFrom] = useState<string>("");
+  // فلاتر
+  const [dateFrom, setDateFrom] = useState<string>(""); // سنرسل واحدًا فقط للباك-إند (انظر fetchData)
   const [dateTo, setDateTo] = useState<string>("");
-  const [fDoctor, setFDoctor] = useState<string>(""); // فلتر الطبيب
-  const [fPatient, setFPatient] = useState<string>(""); // فلتر المريض
+  const [fDoctor, setFDoctor] = useState<string>("");
+  const [fPatient, setFPatient] = useState<string>("");
 
+  // شارت
+  const [selectedDoctor, setSelectedDoctor] = useState<string>("");
+
+  // مراجع
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestRef = useRef<HTMLDivElement>(null);
-  const chartReadyRef = useRef<HTMLDivElement>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
-  /* ============ Load data ============ */
+  /* ============ Boot: جلب أولي ============ */
   useEffect(() => {
-    let cancel = false;
-    (async () => {
-      try {
-        setLoading(true);
-        setErr(null);
-        const data = await httpGet<RecordsResponse>(ENDPOINTS.records);
-        if (cancel) return;
-        const list = (data?.records || []).map((r, i) => ({
-          id: r.id ?? i + 1,
-          ...r,
-        }));
-        setRows(list);
-
-        // كيانات للاقتراح
-        const docSet = new Set<string>();
-        const patSet = new Set<string>();
-        const icdSet = new Set<string>();
-        list.forEach((r) => {
-          const dn = toTitle(r.doctor_name);
-          if (dn && dn.toLowerCase() !== "nan") docSet.add(dn);
-          const pn = toTitle(r.patient_name);
-          if (pn && pn.toLowerCase() !== "nan") patSet.add(pn);
-          const icd = firstIcd(r.ICD10CODE);
-          if (icd) icdSet.add(icd);
-        });
-        setDoctors(Array.from(docSet).sort());
-        setPatients(Array.from(patSet).sort());
-        setIcds(Array.from(icdSet).sort());
-      } catch (e: any) {
-        if (!cancel) setErr(e?.message || "تعذّر تحميل البيانات");
-      } finally {
-        if (!cancel) setLoading(false);
-      }
-    })();
-    return () => {
-      cancel = true;
-    };
+    fetchData(); // للبطاقات/القائمة
+    fetchChartData(); // للشارت (بدون فلتر الطبيب)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // إغلاق الاقتراحات عند الضغط خارجها
+  /* ============ إغلاق اقتراحات عند الضغط خارجًا ============ */
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (
         !suggestRef.current?.contains(e.target as Node) &&
         !inputRef.current?.contains(e.target as Node)
-      ) {
+      )
         setShowSuggest(false);
-      }
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  /* ============ Filtering Pipeline ============ */
-  const normalizeDate = (d: string) =>
-    d ? new Date(d.replace(/-/g, "/")) : null;
-  const withinDate = (isoOrText: string) => {
-    if (!dateFrom && !dateTo) return true;
-    const d = new Date(isoOrText);
-    if (isNaN(d.getTime())) return true; // لو التاريخ نصي غير قابل للتحويل نتجاوزه
-    const from = normalizeDate(dateFrom);
-    const to = normalizeDate(dateTo);
-    if (from && d < from) return false;
-    if (to) {
-      // نهاية اليوم
-      const t2 = new Date(to);
-      t2.setHours(23, 59, 59, 999);
-      if (d > t2) return false;
-    }
-    return true;
-  };
+  /* ============ جلب من الخادم ============ */
+  // تاريخ واحد فقط لأن الباك-إند يدعم "date" فقط
+  const singleDate = useMemo(
+    () => dateFrom || dateTo || "",
+    [dateFrom, dateTo]
+  );
 
-  // فلترة البحث (prefix-first)
-  const searchFiltered = useMemo(() => {
-    if (!hasSearched || !q.trim()) return rows;
-    const key = normalize(q);
-    const isPrefixMode = key.length === 1 || /^[a-zA-Z]$/.test(key);
-    return rows
-      .filter((r) => {
-        const fields = [
-          r.doctor_name,
-          r.patient_name,
-          r.ICD10CODE,
-          r.chief_complaint,
-          r.treatment_date,
-          r.claim_type,
-          r.contract,
-          r.refer_ind,
-          r.emer_ind,
-        ].map((x) => normalize(String(x || "")));
-        if (isPrefixMode && fields.some((f) => f.startsWith(key))) return true;
-        return fields.some((f) => f.includes(key));
-      })
-      .sort((a, b) => {
-        const p = (m: MedRow) =>
-          [m.doctor_name, m.patient_name, m.ICD10CODE, m.chief_complaint].some(
-            (v) => normalize(String(v || "")).startsWith(normalize(q))
-          )
-            ? 0
-            : 1;
-        return p(a) - p(b);
+  async function fetchData(opts?: { keepLoading?: boolean }) {
+    try {
+      if (!opts?.keepLoading) setLoading(true);
+      setErr(null);
+      // نرسل q فقط عندما قام المستخدم بالبحث
+      const params: Record<string, string> = {};
+      if (hasSearched && q.trim()) params.q = q.trim();
+      if (fDoctor) params.doctor = fDoctor;
+      if (fPatient) params.patient = fPatient;
+      if (singleDate) params.date = singleDate;
+
+      const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
+      const list = (data?.records || []).map((r, i) => ({
+        id: r.id ?? i + 1,
+        ...r,
+      }));
+      setRows(list);
+
+      // بناء اقتراحات من نتائج آخر جلب
+      const docSet = new Set<string>();
+      const patSet = new Set<string>();
+      const icdSet = new Set<string>();
+      list.forEach((r) => {
+        const dn = toTitle(r.doctor_name);
+        if (dn && dn.toLowerCase() !== "nan") docSet.add(dn);
+        const pn = toTitle(r.patient_name);
+        if (pn && pn.toLowerCase() !== "nan") patSet.add(pn);
+        const icd = firstIcd(r.ICD10CODE);
+        if (icd) icdSet.add(icd);
       });
-  }, [rows, hasSearched, q]);
+      setDoctors(Array.from(docSet).sort());
+      setPatients(Array.from(patSet).sort());
+      setIcds(Array.from(icdSet).sort());
+    } catch (e: any) {
+      setErr(e?.message || "تعذّر تحميل البيانات");
+    } finally {
+      if (!opts?.keepLoading) setLoading(false);
+    }
+  }
 
-  // فلترة التاريخ + الطبيب + المريض
-  const fullyFiltered = useMemo(() => {
-    return searchFiltered.filter((r) => {
-      if (!withinDate(String(r.treatment_date || ""))) return false;
-      if (fDoctor && toTitle(r.doctor_name) !== fDoctor) return false;
-      if (fPatient && toTitle(r.patient_name) !== fPatient) return false;
-      return true;
-    });
-  }, [searchFiltered, dateFrom, dateTo, fDoctor, fPatient]);
+  // جلب للشارت: لا نرسل doctor حتى عند اختياره (حتى تُخفَّت الأعمدة فقط)
+  async function fetchChartData() {
+    try {
+      const params: Record<string, string> = {};
+      if (fPatient) params.patient = fPatient; // في وضع المريض، الشارت يعكس أطباء هذا المريض فقط
+      if (singleDate) params.date = singleDate;
+      const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
+      const list = (data?.records || []).map((r, i) => ({
+        id: r.id ?? i + 1,
+        ...r,
+      }));
+      setChartRows(list);
+    } catch {
+      // لا شيء
+    }
+  }
 
-  /* ============ Suggestions ============ */
-  type Sug = { label: string; kind: "doctor" | "patient" | "icd" | "text" };
-  const suggestItems = useMemo<Sug[]>(() => {
-    const key = normalize(q);
-    const pool: Sug[] = [];
-    doctors.forEach((d) => pool.push({ label: d, kind: "doctor" }));
-    patients.forEach((p) => pool.push({ label: p, kind: "patient" }));
-    icds.forEach((i) => pool.push({ label: i, kind: "icd" }));
+  // أي تغيير على الطبيب/المريض/التاريخ يعيد الجلب (فوري)
+  useEffect(() => {
+    fetchData();
+    fetchChartData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fDoctor, fPatient, singleDate]);
 
-    if (!key) return pool.slice(0, 8);
+  /* ============ البحث النصّي مع Enter ============ */
+  const qAsPatient = useMemo(() => {
+    const s = toTitle(q.trim());
+    return s && patients.includes(s) ? s : "";
+  }, [q, patients]);
 
-    const starts = pool.filter((s) => normalize(s.label).startsWith(key));
-    const contains = pool.filter(
-      (s) =>
-        !normalize(s.label).startsWith(key) && normalize(s.label).includes(key)
+  function runSearch() {
+    if (!q.trim()) return;
+    setHasSearched(true);
+    const newRecent = [q.trim(), ...recent.filter((x) => x !== q.trim())].slice(
+      0,
+      10
     );
-    const out = [...starts.slice(0, 6), ...contains.slice(0, 4)];
-    return out.slice(0, 8);
-  }, [q, doctors, patients, icds]);
+    setRecent(newRecent);
+    localStorage.setItem("medical_recent", JSON.stringify(newRecent));
+    if (patients.includes(toTitle(q.trim()))) setFPatient(toTitle(q.trim()));
+    fetchData(); // جلب مع q
+    fetchChartData(); // الشارت لا يرسل q
+    setShowSuggest(false);
+  }
 
-  const didYouMean = useMemo(() => {
-    const key = normalize(q);
-    if (!key || key.length < 3) return "";
-    const candidates = [...doctors, ...patients, ...icds];
-    let best = "",
-      bestDist = Infinity;
-    candidates.forEach((c) => {
-      const d = editDist(normalize(c), key);
-      if (d < bestDist) {
-        best = c;
-        bestDist = d;
-      }
-    });
-    return bestDist > 0 && bestDist <= Math.max(3, Math.floor(key.length * 0.5))
-      ? best
-      : "";
-  }, [q, doctors, patients, icds]);
-
-  /* ============ KPIs ============ */
+  /* ============ KPI ============ */
   const kpis = useMemo(() => {
-    const list = fullyFiltered;
+    const list = rows;
     const byDoc: Record<string, number> = {};
     const patSet = new Set<string>();
+    let alerts = 0;
     list.forEach((r) => {
-      const name = firstNameOf(r.doctor_name || "");
-      if (name && name.toLowerCase() !== "nan")
-        byDoc[name] = (byDoc[name] ?? 0) + 1;
+      const n = firstNameOf(r.doctor_name || "");
+      if (n && n.toLowerCase() !== "nan") byDoc[n] = (byDoc[n] ?? 0) + 1;
       const pn = toTitle(r.patient_name);
       if (pn && pn.toLowerCase() !== "nan") patSet.add(pn);
+      if (
+        (r.emer_ind || "").toUpperCase() === "Y" ||
+        (r.refer_ind || "").toUpperCase() === "Y"
+      )
+        alerts++;
     });
-    const alerts = list.filter(
-      (r) =>
-        String(r.emer_ind || "").toUpperCase() === "Y" ||
-        String(r.refer_ind || "").toUpperCase() === "Y"
-    ).length;
-
     return {
       total: list.length,
       doctors: Object.keys(byDoc).length,
       patients: patSet.size,
       alerts,
     };
-  }, [fullyFiltered]);
+  }, [rows]);
 
-  /* ============ Chart ============ */
+  /* ============ Chart Data ============ */
   const chartData = useMemo(() => {
-    if (!hasSearched) return [];
     const by: Record<string, number> = {};
-    fullyFiltered.forEach((r) => {
+    (chartRows.length ? chartRows : rows).forEach((r) => {
       const fn = firstNameOf(r.doctor_name || "");
       if (!fn || fn.toLowerCase() === "nan") return;
       by[fn] = (by[fn] ?? 0) + 1;
     });
-    return Object.entries(by).map(([doctor, count]) => ({ doctor, count }));
-  }, [fullyFiltered, hasSearched]);
+    return Object.entries(by)
+      .map(([doctor, count]) => ({ doctor, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [chartRows, rows]);
 
   const yMeta = useMemo(() => {
     const max = chartData.reduce((m, c) => Math.max(m, c.count), 0);
@@ -428,7 +376,6 @@ export default function MedicalRecords() {
               className="w-10 md:w-12 drop-shadow-sm select-none"
             />
           </div>
-
           <div className="p-6 pt-20 space-y-4 flex-1">
             <nav className="px-4 space-y-2">
               <SideItem
@@ -448,7 +395,6 @@ export default function MedicalRecords() {
               />
             </nav>
           </div>
-
           <div className="mt-auto px-4 pt-10 pb-6">
             <button
               onClick={() => {
@@ -466,319 +412,140 @@ export default function MedicalRecords() {
 
         {/* Content */}
         <main className="p-6 md:p-8 relative" dir="rtl">
-          {/* Back to Home */}
+          {/* Back */}
           <button
             onClick={() => navigate("/home")}
             className="absolute top-4 right-4 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
             title="العودة للصفحة الرئيسية"
             aria-label="العودة للصفحة الرئيسية"
           >
-            <Home className="size-5" style={{ color: theme.deep2 }} />
+            <Home className="size-5" style={{ color: theme.brandDark }} />
           </button>
 
           {/* Header */}
           <div
             className="rounded-2xl p-5 text-white shadow-soft"
-            style={{ background: gradientHeader }}
+            style={{ background: headerGrad }}
           >
             <div className="text-2xl md:text-3xl font-semibold">
               السجلات الطبية
             </div>
             <div className="text-white/90 text-sm mt-1">
-              اكتبي حرفًا أو كلمة؛ مثل <b>M</b> لعرض كل ما يبدأ بـ <b>M</b>.
-              اضغطي Enter للبحث.
+              اكتبي حرفًا أو كلمة؛ مثل <b>M</b> لعرض كل ما يبدأ بـ <b>M</b>. ثم
+              Enter.
             </div>
 
-            {/* Search + Actions */}
-            <div className="mt-4">
-              <div className="flex flex-col gap-3">
-                {/* Row 1: Search + Buttons */}
+            {/* Search */}
+            <SearchBar
+              q={q}
+              setQ={setQ}
+              setHasSearched={setHasSearched}
+              suggestRef={suggestRef}
+              inputRef={inputRef}
+              suggestItems={buildSuggestItems(q, doctors, patients, icds)}
+              didYouMean={didYouMean(q, doctors, patients, icds)}
+              recent={recent}
+              setRecent={setRecent}
+              onRunSearch={runSearch}
+              setShowSuggest={setShowSuggest}
+              showSuggest={showSuggest}
+              activeIdx={activeIdx}
+              setActiveIdx={setActiveIdx}
+            />
+
+            {/* Filters row */}
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {/* Date range (واجهة فقط، الخادم يستقبل تاريخًا واحدًا) */}
+              <div className="flex items-center gap-1 bg-white/10 rounded-2xl px-2 py-1">
                 <div
-                  className="flex flex-col md:flex-row items-stretch md:items-center gap-2"
-                  ref={suggestRef}
+                  className="flex items-center gap-2 bg-white rounded-xl px-3 py-1"
+                  style={{ border: "1px solid transparent" }}
                 >
-                  {/* Search */}
-                  <div className="relative w-full">
-                    <input
-                      ref={inputRef}
-                      value={q}
-                      onChange={(e) => {
-                        setQ(e.target.value);
-                        setShowSuggest(true);
-                        setActiveIdx(0);
-                      }}
-                      onFocus={() => setShowSuggest(true)}
-                      onKeyDown={(e) => {
-                        if (
-                          showSuggest &&
-                          (e.key === "ArrowDown" ||
-                            e.key === "ArrowUp" ||
-                            e.key === "Tab" ||
-                            e.key === "Enter")
-                        ) {
-                          if (e.key === "ArrowDown") {
-                            e.preventDefault();
-                            setActiveIdx((i) =>
-                              Math.min(i + 1, suggestItems.length - 1)
-                            );
-                            return;
-                          }
-                          if (e.key === "ArrowUp") {
-                            e.preventDefault();
-                            setActiveIdx((i) => Math.max(i - 1, 0));
-                            return;
-                          }
-                          if (
-                            (e.key === "Enter" || e.key === "Tab") &&
-                            suggestItems[activeIdx]
-                          ) {
-                            e.preventDefault();
-                            applySuggestion(suggestItems[activeIdx]);
-                            return;
-                          }
-                        }
-                        if (e.key === "Enter") runSearch();
-                      }}
-                      className="w-full h-12 rounded-2xl border text-neutral-900 pl-10 pr-4 outline-none placeholder:text-black/70 focus:ring-4"
-                      style={{
-                        background: theme.mintSoft,
-                        borderColor: theme.accent,
-                        boxShadow: "0 6px 18px rgba(11,59,60,0.06)",
-                      }}
-                      placeholder="ابحثي باسم طبيب/مريض/ICD/نص حر… ثم Enter"
-                      aria-label="بحث موحّد"
-                    />
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/60" />
-                    {/* Suggestions */}
-                    {showSuggest && (
-                      <div className="absolute z-50 mt-2 w-full bg-white border rounded-xl shadow-xl">
-                        {/* Did you mean */}
-                        {didYouMean && (
-                          <div className="px-3 py-2 text-[12px] text-[#9A4A07] bg-[#FFF6E3] rounded-t-xl">
-                            هل تقصدين:{" "}
-                            <button
-                              className="underline font-semibold"
-                              onClick={() => {
-                                setQ(didYouMean);
-                                setShowSuggest(false);
-                                setTimeout(runSearch, 0);
-                              }}
-                            >
-                              {didYouMean}
-                            </button>{" "}
-                            ؟
-                          </div>
-                        )}
-
-                        {/* List */}
-                        <ul className="max-h-[260px] overflow-auto">
-                          {suggestItems.length > 0 ? (
-                            suggestItems.map((s, i) => (
-                              <li key={`${s.kind}-${s.label}`}>
-                                <button
-                                  className={clsx(
-                                    "w-full text-right px-4 py-2 text-[13px] leading-6 hover:bg-emerald-50 flex items-center justify-between",
-                                    i === activeIdx && "bg-emerald-50"
-                                  )}
-                                  style={{ color: theme.ink }} // نص أسود واضح
-                                  onMouseEnter={() => setActiveIdx(i)}
-                                  onClick={() => applySuggestion(s)}
-                                  title={s.label}
-                                >
-                                  <span className="truncate">{s.label}</span>
-                                  <span className="text-[11px] text-black/60">
-                                    {s.kind === "doctor"
-                                      ? "doctor"
-                                      : s.kind === "patient"
-                                      ? "patient"
-                                      : s.kind === "icd"
-                                      ? "icd"
-                                      : "text"}
-                                  </span>
-                                </button>
-                              </li>
-                            ))
-                          ) : (
-                            <div className="px-4 py-3 text-sm text-neutral-500">
-                              لا توجد اقتراحات
-                            </div>
-                          )}
-                        </ul>
-
-                        {/* Recent */}
-                        {recent.length > 0 && (
-                          <div className="border-t p-2">
-                            <div className="px-2 pb-1 text-[11px] text-black/60 flex items-center gap-1">
-                              <History className="size-3.5" /> عمليات بحث سابقة
-                            </div>
-                            <div className="px-2 pb-2 flex flex-wrap gap-2">
-                              {recent.slice(0, 8).map((r) => (
-                                <button
-                                  key={r}
-                                  className="h-7 px-2 rounded-full bg-black/5 text-[12px] hover:bg-black/10"
-                                  onClick={() => {
-                                    setQ(r);
-                                    setShowSuggest(false);
-                                    setTimeout(runSearch, 0);
-                                  }}
-                                  title={r}
-                                >
-                                  {r}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Buttons */}
-                  <div className="flex items-center gap-2">
-                    {/* Date Range */}
-                    <div className="flex items-center gap-1 bg-white/15 rounded-2xl px-2 py-1">
-                      <div className="flex items-center gap-1 bg-white rounded-xl px-2 py-1 border border-white/20">
-                        <CalendarDays className="size-4 text-black/70" />
-                        <input
-                          type="date"
-                          value={dateFrom}
-                          onChange={(e) => setDateFrom(e.target.value)}
-                          className="h-9 bg-transparent outline-none text-[13px] text-black"
-                          title="من تاريخ"
-                        />
-                        <span className="text-black/50 text-xs">إلى</span>
-                        <input
-                          type="date"
-                          value={dateTo}
-                          onChange={(e) => setDateTo(e.target.value)}
-                          className="h-9 bg-transparent outline-none text-[13px] text-black"
-                          title="إلى تاريخ"
-                        />
-                      </div>
-                    </div>
-
-                    {/* Upload Excel */}
-                    <input
-                      ref={fileRef}
-                      type="file"
-                      accept=".xlsx,.xls"
-                      className="hidden"
-                      onChange={onPickExcel}
-                    />
-                    <button
-                      onClick={() => fileRef.current?.click()}
-                      className="h-12 px-4 rounded-2xl text-sm font-semibold shadow-md transition border border-white/30 bg-white text-[#{theme.deep2}] hover:brightness-95 flex items-center gap-2"
-                      title="تحميل جدول Excel"
-                    >
-                      <Upload className="size-4" />
-                      تحميل Excel
-                    </button>
-
-                    {/* Chatbot */}
-                    <button
-                      onClick={() =>
-                        navigate("/chat", {
-                          state: {
-                            query: q,
-                            dateFrom,
-                            dateTo,
-                            doctor: fDoctor,
-                            patient: fPatient,
-                          },
-                        })
-                      }
-                      className="h-12 px-4 rounded-2xl text-sm font-semibold shadow-md transition bg-[color:#97FC4A] text-[color:#0B3B3C] hover:brightness-105 flex items-center gap-2"
-                      title="المساعد الذكي"
-                    >
-                      <Bot className="size-4" />
-                      المساعد الذكي
-                    </button>
-
-                    {/* Search CTA */}
-                    <button
-                      onClick={runSearch}
-                      disabled={!q.trim()}
-                      className={clsx(
-                        "h-12 px-6 rounded-2xl text-sm font-semibold shadow-md transition",
-                        q.trim()
-                          ? "bg-white text-[color:#0B3B3C] border border-white/40 hover:bg-white/90"
-                          : "bg-white/20 text-white/60 cursor-not-allowed border border-white/30"
-                      )}
-                      title="بحث"
-                    >
-                      بحث
-                    </button>
-                  </div>
+                  <CalendarDays className="size-4 text-black/70" />
+                  <input
+                    type="date"
+                    value={dateFrom}
+                    onChange={(e) => setDateFrom(e.target.value)}
+                    className="h-9 bg-transparent outline-none text-[13px] text-black"
+                    title="من تاريخ"
+                  />
+                  <span className="text-black/50 text-xs">إلى</span>
+                  <input
+                    type="date"
+                    value={dateTo}
+                    onChange={(e) => setDateTo(e.target.value)}
+                    className="h-9 bg-transparent outline-none text-[13px] text-black"
+                    title="إلى تاريخ"
+                  />
                 </div>
+              </div>
 
-                {/* Row 2: Filters (Doctor/Patient) */}
-                <div className="flex items-center gap-2">
-                  <div
-                    className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border"
+              {/* Chatbot */}
+              <button
+                onClick={() =>
+                  navigate("/chat", {
+                    state: {
+                      query: q,
+                      date: singleDate,
+                      doctor: fDoctor,
+                      patient: fPatient || qAsPatient,
+                    },
+                  })
+                }
+                className="h-10 px-4 rounded-xl text-sm font-semibold shadow-md transition"
+                style={{ background: "#A7F3D0", color: theme.brandDark }}
+                title="المساعد الذكي"
+              >
+                <span className="inline-flex items-center gap-1">
+                  <Bot className="size-4" /> المساعد الذكي
+                </span>
+              </button>
+
+              {/* Quick Filters */}
+              <div
+                className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border text-black"
+                style={{ borderColor: theme.border }}
+              >
+                <Filter className="size-4 text-black/70" />
+                <span className="text-sm">فلترة:</span>
+
+                {/* Doctor */}
+                <SelectWithArrow
+                  value={fDoctor}
+                  onChange={(v) => {
+                    setFDoctor(v);
+                    setSelectedDoctor(v || "");
+                  }}
+                  title="حسب الطبيب"
+                  placeholder="كل الأطباء"
+                  options={doctors}
+                />
+
+                {/* Patient */}
+                <SelectWithArrow
+                  value={fPatient}
+                  onChange={(v) => setFPatient(v)}
+                  title="حسب المريض"
+                  placeholder="كل المرضى"
+                  options={patients}
+                />
+
+                {(fDoctor || fPatient || dateFrom || dateTo) && (
+                  <button
+                    onClick={() => {
+                      setFDoctor("");
+                      setFPatient("");
+                      setDateFrom("");
+                      setDateTo("");
+                      setSelectedDoctor("");
+                    }}
+                    className="h-9 px-3 rounded-lg text-sm border hover:bg-black/5 text-black"
                     style={{ borderColor: theme.border }}
+                    title="إزالة جميع الفلاتر"
                   >
-                    <Filter className="size-4 text-black/60" />
-                    <span className="text-sm text-black/70">فلترة:</span>
-
-                    {/* Doctor */}
-                    <select
-                      value={fDoctor}
-                      onChange={(e) => setFDoctor(e.target.value)}
-                      className="h-9 rounded-lg border px-2 text-sm"
-                      style={{
-                        borderColor: theme.border,
-                        background: theme.surfaceAlt,
-                      }}
-                      title="فلترة حسب الطبيب"
-                    >
-                      <option value="">كل الأطباء</option>
-                      {doctors.map((d) => (
-                        <option key={d} value={d}>
-                          {d}
-                        </option>
-                      ))}
-                    </select>
-
-                    {/* Patient */}
-                    <select
-                      value={fPatient}
-                      onChange={(e) => setFPatient(e.target.value)}
-                      className="h-9 rounded-lg border px-2 text-sm"
-                      style={{
-                        borderColor: theme.border,
-                        background: theme.surfaceAlt,
-                      }}
-                      title="فلترة حسب المريض"
-                    >
-                      <option value="">كل المرضى</option>
-                      {patients.map((p) => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-
-                    {/* Reset quick */}
-                    {(fDoctor || fPatient || dateFrom || dateTo) && (
-                      <button
-                        onClick={() => {
-                          setFDoctor("");
-                          setFPatient("");
-                          setDateFrom("");
-                          setDateTo("");
-                        }}
-                        className="h-9 px-3 rounded-lg text-sm border hover:bg-black/5"
-                        style={{
-                          borderColor: theme.border,
-                          color: theme.deep2,
-                        }}
-                        title="إزالة جميع الفلاتر"
-                      >
-                        إعادة التعيين
-                      </button>
-                    )}
-                  </div>
-                </div>
+                    إعادة التعيين
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -797,230 +564,182 @@ export default function MedicalRecords() {
             </div>
           )}
 
-          {/* KPIs */}
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-4 gap-4">
-            <Kpi
+          {/* KPI Cards */}
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <KpiCard
               title="عدد السجلات"
               value={kpis.total}
-              bg="#FFFFFF"
-              fg={theme.deep2}
-              accent={theme.deep}
+              color={theme.kpiBlue}
+              icon={<ClipboardList className="size-5" />}
             />
-            <Kpi
+            <KpiCard
               title="عدد الأطباء"
               value={kpis.doctors}
-              bg="#FFFFFF"
-              fg={theme.deep2}
-              accent={theme.deep}
+              color={theme.kpiYellow}
+              icon={<UserPlus className="size-5" />}
             />
-            <Kpi
+            <KpiCard
               title="عدد المرضى"
               value={kpis.patients}
-              bg="#FFFFFF"
-              fg={theme.deep2}
-              accent={theme.deep}
+              color={theme.kpiRed}
+              icon={<Users className="size-5" />}
             />
-            <Kpi
+            <KpiCard
               title="عدد التنبيهات"
               value={kpis.alerts}
-              bg="#FFFFFF"
-              fg={theme.blue}
-              accent={theme.blue}
+              color={theme.kpiGreen}
+              icon={<Bell className="size-5" />}
             />
           </div>
 
-          {/* Chart + Cards (بعد أول بحث أو وجود فلاتر) */}
-          {(hasSearched || q || fDoctor || fPatient || dateFrom || dateTo) && (
-            <>
-              {/* Chart */}
+          {/* Chart */}
+          <div
+            className="mt-6 rounded-2xl bg-white shadow-soft p-5 border"
+            style={{ borderColor: theme.border }}
+          >
+            <div className="mb-3 font-semibold text-neutral-700 flex items-center justify-between">
+              <span>
+                {fPatient || qAsPatient
+                  ? `عدد سجلات المريض (${fPatient || qAsPatient}) لكل طبيب`
+                  : "عدد السجلات لكل طبيب"}
+              </span>
+              {selectedDoctor && (
+                <button
+                  className="text-xs px-2 py-1 rounded-full border hover:bg-black/5"
+                  style={{ borderColor: theme.border }}
+                  onClick={() => setSelectedDoctor("")}
+                >
+                  إلغاء تمييز الطبيب
+                </button>
+              )}
+            </div>
+            <div
+              style={{
+                width: "100%",
+                height: 360,
+                minWidth: 320,
+                minHeight: 200,
+              }}
+            >
+              {chartData.length > 0 ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={chartData}
+                    margin={{ top: 10, right: 24, left: 8, bottom: 28 }}
+                    barCategoryGap={30}
+                    barGap={6}
+                    onClick={(e: any) => {
+                      const name = e?.activeLabel as string | undefined;
+                      if (name) setSelectedDoctor(name);
+                    }}
+                  >
+                    <CartesianGrid
+                      vertical={false}
+                      strokeDasharray="3 3"
+                      stroke="#E5E7EB"
+                    />
+                    <defs>
+                      <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop
+                          offset="0%"
+                          stopColor="#34D399"
+                          stopOpacity={0.95}
+                        />
+                        <stop
+                          offset="100%"
+                          stopColor={theme.brandDark}
+                          stopOpacity={0.95}
+                        />
+                      </linearGradient>
+                    </defs>
+                    <XAxis
+                      dataKey="doctor"
+                      tick={{ fontSize: 12, fill: "#374151" }}
+                      angle={-15}
+                      interval={0}
+                      height={54}
+                      tickLine={false}
+                      axisLine={{ stroke: "#E5E7EB" }}
+                    />
+                    <YAxis
+                      ticks={yMeta.ticks}
+                      domain={[0, yMeta.top]}
+                      tick={{ fontSize: 12, fill: "#374151" }}
+                      axisLine={false}
+                      tickLine={false}
+                      width={36}
+                    />
+                    <RTooltip
+                      contentStyle={{
+                        backgroundColor: "white",
+                        borderRadius: 12,
+                        boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
+                        border: "1px solid #E5E7EB",
+                      }}
+                      formatter={(v: any) => [
+                        String(v),
+                        fPatient || qAsPatient ? "سجلات المريض" : "عدد السجلات",
+                      ]}
+                      labelFormatter={(l: any) => `الطبيب: ${l}`}
+                    />
+                    <Bar
+                      dataKey="count"
+                      barSize={44}
+                      radius={[12, 12, 8, 8]}
+                      animationDuration={250}
+                    >
+                      {chartData.map((d, i) => {
+                        const active =
+                          !selectedDoctor || selectedDoctor === d.doctor;
+                        return (
+                          <Cell
+                            key={`cell-${i}`}
+                            fill="url(#barGrad)"
+                            fillOpacity={active ? 1 : 0.25}
+                            stroke={active ? "#34D399" : "transparent"}
+                            strokeWidth={active ? 1.2 : 0}
+                          />
+                        );
+                      })}
+                      <LabelList
+                        dataKey="count"
+                        position="top"
+                        formatter={(v: number) => String(v)}
+                        fontSize={12}
+                      />
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="h-full grid place-items-center text-neutral-500 text-sm">
+                  لا توجد بيانات
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Cards */}
+          <div className="mt-6 grid grid-cols-1 gap-4 print:gap-2">
+            {rows.length === 0 && !loading ? (
               <div
-                className="mt-6 rounded-2xl bg-white shadow-soft p-5 border"
+                className="h-[160px] grid place-items-center text-neutral-500 text-sm border rounded-2xl bg-white"
                 style={{ borderColor: theme.border }}
               >
-                <div className="mb-3 font-semibold text-neutral-700">
-                  عدد السجلات لكل طبيب
-                </div>
-                <div
-                  ref={chartReadyRef}
-                  style={{
-                    width: "100%",
-                    height: 360,
-                    minWidth: 320,
-                    minHeight: 200,
-                  }}
-                >
-                  {chartData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={chartData}
-                        margin={{ top: 10, right: 24, left: 8, bottom: 28 }}
-                        barCategoryGap={30}
-                        barGap={6}
-                        onClick={(e: any) => {
-                          const name = e?.activeLabel as string | undefined;
-                          if (name) setFDoctor(name); // فلترة بالنقر على العمود
-                        }}
-                      >
-                        <CartesianGrid
-                          vertical={false}
-                          strokeDasharray="3 3"
-                          stroke="#E5E7EB"
-                        />
-                        <defs>
-                          <linearGradient
-                            id="barGrad"
-                            x1="0"
-                            y1="0"
-                            x2="0"
-                            y2="1"
-                          >
-                            <stop
-                              offset="0%"
-                              stopColor={theme.accent}
-                              stopOpacity={0.95}
-                            />
-                            <stop
-                              offset="100%"
-                              stopColor={theme.deep}
-                              stopOpacity={0.95}
-                            />
-                          </linearGradient>
-                        </defs>
-                        <XAxis
-                          dataKey="doctor"
-                          tick={{ fontSize: 12, fill: "#374151" }}
-                          angle={-15}
-                          interval={0}
-                          height={54}
-                          tickLine={false}
-                          axisLine={{ stroke: "#E5E7EB" }}
-                        />
-                        <YAxis
-                          ticks={yMeta.ticks}
-                          domain={[0, yMeta.top]}
-                          tick={{ fontSize: 12, fill: "#374151" }}
-                          axisLine={false}
-                          tickLine={false}
-                          width={36}
-                        />
-                        <RTooltip
-                          contentStyle={{
-                            backgroundColor: "white",
-                            borderRadius: 12,
-                            boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
-                            border: "1px solid #E5E7EB",
-                          }}
-                          formatter={(v: any) => [String(v), "عدد السجلات"]}
-                          labelFormatter={(l: any) => `الطبيب: ${l}`}
-                        />
-                        <Bar
-                          dataKey="count"
-                          barSize={44}
-                          radius={[12, 12, 8, 8]}
-                          fill="url(#barGrad)"
-                        >
-                          <LabelList
-                            dataKey="count"
-                            position="top"
-                            formatter={(v: number) => String(v)}
-                            fontSize={12}
-                          />
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="h-full grid place-items-center text-neutral-500 text-sm">
-                      {fullyFiltered.length === 0
-                        ? "لا توجد بيانات"
-                        : "جارٍ التجهيز…"}
-                    </div>
-                  )}
-                </div>
+                لا توجد بيانات مطابقة — عدّلي مفتاح البحث أو الفلاتر
               </div>
-
-              {/* Cards */}
-              <div className="mt-6 grid grid-cols-1 gap-4 print:gap-2">
-                {fullyFiltered.length === 0 ? (
-                  <div
-                    className="h-[160px] grid place-items-center text-neutral-500 text-sm border rounded-2xl bg-white"
-                    style={{ borderColor: theme.border }}
-                  >
-                    لا توجد بيانات مطابقة — عدّلي مفتاح البحث أو الفلاتر
-                  </div>
-                ) : (
-                  fullyFiltered.map((r) => (
-                    <RecordCard
-                      key={String(r.id ?? r.patient_name + r.treatment_date)}
-                      r={r}
-                    />
-                  ))
-                )}
-              </div>
-            </>
-          )}
+            ) : (
+              rows.map((r) => (
+                <RecordCard
+                  key={String(r.id ?? r.patient_name + r.treatment_date)}
+                  r={r}
+                />
+              ))
+            )}
+          </div>
         </main>
       </div>
     </div>
   );
-
-  /* ======== Actions ======== */
-  function runSearch() {
-    if (!q.trim()) return;
-    setHasSearched(true);
-    const newRecent = [q.trim(), ...recent.filter((x) => x !== q.trim())].slice(
-      0,
-      10
-    );
-    setRecent(newRecent);
-    localStorage.setItem("medical_recent", JSON.stringify(newRecent));
-    setShowSuggest(false);
-  }
-
-  function applySuggestion(s: { label: string }) {
-    setQ(s.label);
-    setShowSuggest(false);
-    setHasSearched(true);
-  }
-
-  async function onPickExcel(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    try {
-      setLoading(true);
-      setErr(null);
-      const res = await httpUpload(ENDPOINTS.upload, f);
-      // إعادة تحميل البيانات بعد نجاح الرفع
-      const data = await httpGet<RecordsResponse>(ENDPOINTS.records);
-      const list = (data?.records || []).map((r, i) => ({
-        id: r.id ?? i + 1,
-        ...r,
-      }));
-      setRows(list);
-
-      // إعادة بناء الاقتراحات
-      const docSet = new Set<string>();
-      const patSet = new Set<string>();
-      const icdSet = new Set<string>();
-      list.forEach((r) => {
-        const dn = toTitle(r.doctor_name);
-        if (dn && dn.toLowerCase() !== "nan") docSet.add(dn);
-        const pn = toTitle(r.patient_name);
-        if (pn && pn.toLowerCase() !== "nan") patSet.add(pn);
-        const icd = firstIcd(r.ICD10CODE);
-        if (icd) icdSet.add(icd);
-      });
-      setDoctors(Array.from(docSet).sort());
-      setPatients(Array.from(patSet).sort());
-      setIcds(Array.from(icdSet).sort());
-
-      alert("تم تحميل ملف Excel وتحديث السجلات بنجاح ✅");
-    } catch (e: any) {
-      alert(`تعذّر تحميل الملف أو تحديث السجلات:\n${e?.message || e}`);
-    } finally {
-      setLoading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
-  }
 }
 
 /* ===================== Sub Components ===================== */
@@ -1042,7 +761,7 @@ function SideItem({
         "w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300",
         active ? "text-[#0B3B3C] border border-black/10" : "hover:bg-black/5"
       )}
-      style={active ? { backgroundColor: theme.mint } : {}}
+      style={active ? { backgroundColor: "#E6FFF4" } : {}}
       aria-current={active ? "page" : undefined}
     >
       <span className="font-medium">{label}</span>
@@ -1051,36 +770,119 @@ function SideItem({
   );
 }
 
-function Kpi({
+/* ===== بطاقة KPI بتدرّج فاتح + الأيقونة في الجهة المقابلة، وبدون (...) ===== */
+function KpiCard({
   title,
   value,
-  bg,
-  fg,
-  accent,
+  color,
+  icon,
 }: {
   title: string;
   value: number | string;
-  bg: string;
-  fg: string;
-  accent: string;
+  color: string;
+  icon: React.ReactNode;
 }) {
+  const grad = `linear-gradient(135deg, ${color} 0%, rgba(255,255,255,0.35) 100%)`;
   return (
     <div
-      className="rounded-2xl px-5 py-3 shadow-soft border text-left relative overflow-hidden"
-      style={{ backgroundColor: bg, color: fg, borderColor: theme.border }}
+      className="relative rounded-2xl text-white p-4 overflow-hidden shadow-soft"
+      style={{ background: grad }}
     >
-      <div
-        className="absolute left-0 top-0 h-full w-1.5"
-        style={{ background: accent }}
-        aria-hidden
-      />
-      <div className="text-sm opacity-80 mb-1">{title}</div>
-      <div className="text-2xl font-semibold tabular-nums">{value}</div>
+      {/* كبسولة الأيقونة (بالجهة الأخرى) */}
+      <div className="absolute top-3 left-3">
+        <div className="w-10 h-10 rounded-xl bg-white/25 backdrop-blur-sm grid place-items-center">
+          {icon}
+        </div>
+      </div>
+
+      {/* موجة زخرفية فاتحة */}
+      <svg
+        width="140"
+        height="46"
+        viewBox="0 0 120 40"
+        className="absolute right-6 top-8 opacity-30"
+      >
+        <path
+          d="M0,20 C20,0 40,40 60,20 C80,0 100,40 120,20"
+          fill="none"
+          stroke="white"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+      </svg>
+
+      <div className="mt-8 text-3xl font-semibold tabular-nums text-right">
+        {value}
+      </div>
+      <div className="opacity-95 text-right">{title}</div>
+    </div>
+  );
+}
+
+/* ===== عنصر select مع سهم أعلى النص ===== */
+function SelectWithArrow({
+  value,
+  onChange,
+  options,
+  placeholder,
+  title,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: string[];
+  placeholder: string;
+  title?: string;
+}) {
+  return (
+    <div className="relative">
+      {/* السهم أعلى النص */}
+      <svg
+        width="10"
+        height="6"
+        viewBox="0 0 10 6"
+        className="absolute -top-2 left-1/2 -translate-x-1/2"
+        aria-hidden="true"
+      >
+        <path
+          d="M0,6 L5,0 L10,6"
+          fill="none"
+          stroke="#64748B"
+          strokeWidth="1.5"
+        />
+      </svg>
+
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        title={title}
+        className="h-9 rounded-lg border px-2 text-sm text-black bg-white pr-6 appearance-none"
+        style={{
+          borderColor: theme.border,
+          backgroundImage:
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 20 20'%3E%3Cpath fill='%2364748B' d='M5.5 7.5l4.5 5 4.5-5z'/%3E%3C/svg%3E\")",
+          backgroundRepeat: "no-repeat",
+          backgroundPosition: "left 8px center",
+        }}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
 
 function RecordCard({ r }: { r: MedRow }) {
+  const statusColor =
+    (r.emer_ind || "").toUpperCase() === "Y"
+      ? "#F59E0B"
+      : (r.refer_ind || "").toUpperCase() === "Y"
+      ? "#2563EB"
+      : "#10B981";
+
   const badge = (txt: string, color: string) => (
     <span
       className="px-3 py-1 text-xs rounded-full font-semibold"
@@ -1092,15 +894,18 @@ function RecordCard({ r }: { r: MedRow }) {
 
   return (
     <div
-      className="rounded-2xl border bg-white p-4 shadow-sm print:shadow-none print:p-3"
+      className="rounded-2xl border bg-white p-4 shadow-sm print:shadow-none print:p-3 transition-transform duration-150 hover:-translate-y-[2px] hover:shadow-lg relative overflow-hidden"
       style={{ borderColor: theme.border }}
     >
+      <div
+        className="absolute right-0 top-0 h-full w-1.5"
+        style={{ background: statusColor }}
+      />
       <div className="flex flex-wrap items-center gap-2 mb-3">
-        {r.claim_type && badge(`نوع المطالبة: ${r.claim_type}`, theme.deep2)}
-        {String(r.emer_ind || "").toUpperCase() === "Y" &&
-          badge(`عاجل`, "#B45309")}
-        {String(r.refer_ind || "").toUpperCase() === "Y" &&
-          badge(`تحويل`, "#2563EB")}
+        {r.claim_type &&
+          badge(`نوع المطالبة: ${r.claim_type}`, theme.brandDark)}
+        {(r.emer_ind || "").toUpperCase() === "Y" && badge("عاجل", "#B45309")}
+        {(r.refer_ind || "").toUpperCase() === "Y" && badge("تحويل", "#2563EB")}
         {r.contract && badge("يوجد عقد", "#065F46")}
       </div>
 
@@ -1116,7 +921,7 @@ function RecordCard({ r }: { r: MedRow }) {
         <Field label="ICD10" value={firstIcd(r.ICD10CODE) || "—"} />
         <Field
           label="الشكوى الرئيسية"
-          value={brief(r.chief_complaint, 160)}
+          value={brief(r.chief_complaint, 180)}
           full
           multiline
         />
@@ -1124,20 +929,6 @@ function RecordCard({ r }: { r: MedRow }) {
         {r.ai_analysis && (
           <Field label="تحليل AI" value={r.ai_analysis} full multiline />
         )}
-      </div>
-
-      <div className="mt-3 flex items-center gap-2">
-        <button
-          className="h-9 px-3 rounded-lg text-sm border hover:bg-black/5"
-          style={{ borderColor: theme.border, color: theme.deep2 }}
-          title="إرسال هذه البطاقة للمساعد الذكي"
-          onClick={() => {
-            // يمكن لاحقًا تمرير تفاصيل السجل
-            alert("سيتم تمرير هذا السجل إلى المساعد الذكي في التحديث القادم.");
-          }}
-        >
-          إرسال للمساعد الذكي
-        </button>
       </div>
     </div>
   );
@@ -1169,4 +960,233 @@ function Field({
       </div>
     </div>
   );
+}
+
+/* ====== SearchBar مُحسّن (مظهر احترافي) ====== */
+function SearchBar(props: {
+  q: string;
+  setQ: (v: string) => void;
+  setHasSearched: (v: boolean) => void;
+  suggestRef: React.RefObject<HTMLDivElement>;
+  inputRef: React.RefObject<HTMLInputElement>;
+  suggestItems: {
+    label: string;
+    kind: "doctor" | "patient" | "icd" | "text";
+  }[];
+  didYouMean: string;
+  recent: string[];
+  setRecent: (v: string[]) => void;
+  onRunSearch: () => void;
+  showSuggest: boolean;
+  setShowSuggest: (b: boolean) => void;
+  activeIdx: number;
+  setActiveIdx: (n: number) => void;
+}) {
+  const {
+    q,
+    setQ,
+    setHasSearched,
+    suggestRef,
+    inputRef,
+    suggestItems,
+    didYouMean,
+    recent,
+    setRecent,
+    onRunSearch,
+    showSuggest,
+    setShowSuggest,
+    activeIdx,
+    setActiveIdx,
+  } = props;
+
+  const apply = (s: { label: string }) => {
+    setQ(s.label);
+    setHasSearched(true);
+    setShowSuggest(false);
+    setTimeout(onRunSearch, 0);
+  };
+
+  return (
+    <div className="mt-4 relative" ref={suggestRef}>
+      <div className="flex items-center gap-2">
+        <div className="relative w-full">
+          <input
+            ref={inputRef}
+            value={q}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setShowSuggest(true);
+              setActiveIdx(0);
+            }}
+            onFocus={() => setShowSuggest(true)}
+            onKeyDown={(e) => {
+              if (
+                showSuggest &&
+                (e.key === "ArrowDown" ||
+                  e.key === "ArrowUp" ||
+                  e.key === "Tab" ||
+                  e.key === "Enter")
+              ) {
+                if (e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setActiveIdx(
+                    Math.min(activeIdx + 1, suggestItems.length - 1)
+                  );
+                  return;
+                }
+                if (e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setActiveIdx(Math.max(activeIdx - 1, 0));
+                  return;
+                }
+                if (
+                  (e.key === "Enter" || e.key === "Tab") &&
+                  suggestItems[activeIdx]
+                ) {
+                  e.preventDefault();
+                  apply(suggestItems[activeIdx]);
+                  return;
+                }
+              }
+              if (e.key === "Enter") onRunSearch();
+            }}
+            className="w-full h-12 rounded-2xl pl-10 pr-4 outline-none placeholder:text-black/60"
+            style={{
+              background: "#F7FAF9",
+              border: `1px solid ${theme.border}`,
+              boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)",
+              color: "#111827",
+            }}
+            placeholder="ابحثي باسم طبيب/مريض/ICD/نص حر… ثم Enter"
+            aria-label="بحث موحّد"
+          />
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/70" />
+          {showSuggest && (
+            <div className="absolute z-50 mt-2 w-full bg-white border rounded-xl shadow-xl">
+              {didYouMean && (
+                <div className="px-3 py-2 text-[12px] text-[#9A4A07] bg-[#FFF6E3] rounded-t-xl">
+                  هل تقصدين:{" "}
+                  <button
+                    className="underline font-semibold"
+                    onClick={() => {
+                      setQ(didYouMean);
+                      setShowSuggest(false);
+                      setTimeout(onRunSearch, 0);
+                    }}
+                  >
+                    {didYouMean}
+                  </button>{" "}
+                  ؟
+                </div>
+              )}
+              <ul className="max-h-[260px] overflow-auto">
+                {suggestItems.length > 0 ? (
+                  suggestItems.map((s, i) => (
+                    <li key={`${s.kind}-${s.label}`}>
+                      <button
+                        className={clsx(
+                          "w-full text-right px-4 py-2 text-[13px] leading-6 hover:bg-emerald-50 flex items-center justify-between",
+                          i === activeIdx && "bg-emerald-50"
+                        )}
+                        style={{ color: theme.ink }}
+                        onMouseEnter={() => setActiveIdx(i)}
+                        onClick={() => apply(s)}
+                        title={s.label}
+                      >
+                        <span className="truncate">{s.label}</span>
+                        <span className="text-[11px] text-black/60">
+                          {s.kind === "doctor"
+                            ? "doctor"
+                            : s.kind === "patient"
+                            ? "patient"
+                            : s.kind === "icd"
+                            ? "icd"
+                            : "text"}
+                        </span>
+                      </button>
+                    </li>
+                  ))
+                ) : (
+                  <div className="px-4 py-3 text-sm text-neutral-500">
+                    لا توجد اقتراحات
+                  </div>
+                )}
+              </ul>
+              {recent.length > 0 && (
+                <div className="border-t p-2">
+                  <div className="px-2 pb-1 text-[11px] text-black/60 flex items-center gap-1">
+                    <History className="size-3.5" /> عمليات بحث سابقة
+                  </div>
+                  <div className="px-2 pb-2 flex flex-wrap gap-2">
+                    {recent.slice(0, 8).map((r) => (
+                      <button
+                        key={r}
+                        className="h-7 px-2 rounded-full bg-black/5 text-[12px] hover:bg-black/10"
+                        onClick={() => {
+                          setQ(r);
+                          setShowSuggest(false);
+                          setTimeout(onRunSearch, 0);
+                        }}
+                        title={r}
+                      >
+                        {r}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ======= Utils لبناء الاقتراحات وDidYouMean ======= */
+function buildSuggestItems(
+  q: string,
+  doctors: string[],
+  patients: string[],
+  icds: string[]
+) {
+  const key = normalize(q);
+  const pool: { label: string; kind: "doctor" | "patient" | "icd" | "text" }[] =
+    [];
+  doctors.forEach((d) => pool.push({ label: d, kind: "doctor" }));
+  patients.forEach((p) => pool.push({ label: p, kind: "patient" }));
+  icds.forEach((i) => pool.push({ label: i, kind: "icd" }));
+
+  if (!key) return pool.slice(0, 8);
+
+  const starts = pool.filter((s) => normalize(s.label).startsWith(key));
+  const contains = pool.filter(
+    (s) =>
+      !normalize(s.label).startsWith(key) && normalize(s.label).includes(key)
+  );
+  const out = [...starts.slice(0, 6), ...contains.slice(0, 4)];
+  return out.slice(0, 8);
+}
+
+function didYouMean(
+  q: string,
+  doctors: string[],
+  patients: string[],
+  icds: string[]
+) {
+  const key = normalize(q);
+  if (!key || key.length < 3) return "";
+  const candidates = [...doctors, ...patients, ...icds];
+  let best = "",
+    bestDist = Infinity;
+  candidates.forEach((c) => {
+    const d = editDist(normalize(c), key);
+    if (d < bestDist) {
+      best = c;
+      bestDist = d;
+    }
+  });
+  return bestDist > 0 && bestDist <= Math.max(3, Math.floor(key.length * 0.5))
+    ? best
+    : "";
 }
