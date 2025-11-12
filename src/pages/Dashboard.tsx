@@ -16,6 +16,7 @@ import {
   Users,
   UserPlus,
   ClipboardList,
+  Bot,
 } from "lucide-react";
 import clsx from "clsx";
 import {
@@ -33,13 +34,10 @@ import {
 /* ===================== Theme ===================== */
 const theme = {
   brandDark: "#0E6B43",
+  brandMid: "#0B5A38",
   surfaceAlt: "#F5F7FB",
   ink: "#0B0F14",
   border: "#E6EEF0",
-  kpiBlue: "#2563EB",
-  kpiYellow: "#F59E0B",
-  kpiRed: "#EF4444",
-  kpiGreen: "#10B981",
 };
 
 const pageBg =
@@ -56,6 +54,8 @@ const toTitle = (s: string) =>
   (s || "")
     .trim()
     .toLowerCase()
+    .replace(/[\\\/|]+/g, " ")
+    .replace(/[.,;:_]+/g, " ")
     .replace(/\s+/g, " ")
     .replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -63,13 +63,29 @@ const dropTitles = new Set([
   "dr",
   "dr.",
   "doctor",
+  "prof",
+  "prof.",
+  "mr",
+  "mrs",
+  "ms",
   "د",
   "د.",
   "دكتور",
   "الدكتور",
+  "أ.",
+  "أ.د",
+  "بروف",
+  "البروف",
+  "أستاذ",
 ]);
+
 const firstNameOf = (name: string) => {
-  const parts = (name || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const cleaned = (name || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\\\/|]+/g, " ")
+    .replace(/[.,;:_]+/g, " ");
+  const parts = cleaned.split(/\s+/).filter(Boolean);
   const firstReal = parts.find((p) => !dropTitles.has(p)) || parts[0] || "";
   return toTitle(firstReal);
 };
@@ -82,18 +98,19 @@ const normalize = (s: string) =>
     .replace(/[آأإ]/g, "ا")
     .replace(/ى/g, "ي")
     .replace(/ة/g, "ه")
-    .replace(/[‐–—]/g, "-")
+    .replace(/[‐–—]+/g, "-")
+    .replace(/[\\\/|]+/g, " ")
+    .replace(/[(),.;:]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 
-const firstIcd = (s: string) =>
-  String(s || "")
-    .split(/[,،;\n|]/)[0]
-    ?.split("(")[0]
-    .trim();
+const firstIcd = (s: string) => {
+  const m = String(s || "").match(/([A-Za-z]\d{1,2}(?:\.\d+)?)/);
+  return m ? m[1].toUpperCase() : "";
+};
 
 const brief = (s: string, max = 120) => {
-  const t = (String(s || "").split(/[\n،,;-]/)[0] || "").trim();
+  const t = (String(s || "").split(/[\n،,;()-]/)[0] || "").trim();
   return t.length > max ? t.slice(0, max) + "…" : t;
 };
 
@@ -118,6 +135,28 @@ function editDist(a: string, b: string) {
     }
   }
   return dp[a.length][b.length];
+}
+
+// lighten/darken for KPI gradients
+function darken(hex: string, amt = 0.35) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.substring(0, 2), 16);
+  const g = parseInt(h.substring(2, 4), 16);
+  const b = parseInt(h.substring(4, 6), 16);
+  const f = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(v * (1 - amt))));
+  const toHex = (v: number) => v.toString(16).padStart(2, "0");
+  return `#${toHex(f(r))}${toHex(f(g))}${toHex(f(b))}`;
+}
+function lighten(hex: string, amt = 0.2) {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const F = (v: number) =>
+    Math.max(0, Math.min(255, Math.round(v + (255 - v) * amt)));
+  const H = (v: number) => v.toString(16).padStart(2, "0");
+  return `#${H(F(r))}${H(F(g))}${H(F(b))}`;
 }
 
 /* ========= Power Query ========= */
@@ -245,17 +284,16 @@ type ChartMode = "byDoctorGlobal" | "byPatientForDoctor" | "byDoctorForPatient";
 export default function MedicalRecords() {
   const navigate = useNavigate();
 
-  // === 1) Loading control to avoid "no data" flash
+  // loading
   const [loading, setLoading] = useState(true);
   const [firstLoadDone, setFirstLoadDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   // table/cards
   const [rows, setRows] = useState<MedRow[]>([]);
-  // chart base
   const [chartRows, setChartRows] = useState<MedRow[]>([]);
 
-  // === Master store (unfiltered) for static filter lists
+  // master
   const [masterAll, setMasterAll] = useState<MedRow[]>([]);
   const [masterPatientsByDoctor, setMasterPatientsByDoctor] = useState<
     Record<string, string[]>
@@ -264,7 +302,7 @@ export default function MedicalRecords() {
     Record<string, string[]>
   >({});
 
-  // masters for suggestions
+  // suggestions pools
   const [allDoctors, setAllDoctors] = useState<string[]>([]);
   const [allPatients, setAllPatients] = useState<string[]>([]);
   const [allIcds, setAllIcds] = useState<string[]>([]);
@@ -274,7 +312,7 @@ export default function MedicalRecords() {
   const [ctxPatients, setCtxPatients] = useState<string[]>([]);
   const [ctxDoctors, setCtxDoctors] = useState<string[]>([]);
 
-  // search UI
+  // search
   const [q, setQ] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [recent, setRecent] = useState<string[]>(
@@ -295,10 +333,10 @@ export default function MedicalRecords() {
   const [fDoctor, setFDoctor] = useState<string>("");
   const [fPatient, setFPatient] = useState<string>("");
 
-  // ICD filter
+  // ICD
   const [selIcd, setSelIcd] = useState<string>("");
 
-  // chart selection highlight
+  // chart focus
   const [selectedName, setSelectedName] = useState<string>("");
 
   // refs
@@ -310,11 +348,10 @@ export default function MedicalRecords() {
     [dateFrom, dateTo]
   );
 
-  /* ============ Boot: load master (unfiltered) once ============ */
+  /* ============ Boot ============ */
   useEffect(() => {
     (async () => {
       try {
-        // Load everything without filters (for stable lists)
         const data = await httpGet<RecordsResponse>(ENDPOINTS.records, {});
         const list = (data.records || []).map((r, i) => ({
           id: r.id ?? i + 1,
@@ -322,7 +359,6 @@ export default function MedicalRecords() {
         }));
         setMasterAll(list);
 
-        // Build suggestion pools
         const d = new Set<string>(),
           p = new Set<string>(),
           i = new Set<string>();
@@ -334,14 +370,10 @@ export default function MedicalRecords() {
           const ic = firstIcd(r.ICD10CODE);
           if (ic) i.add(ic);
         });
-        const allD = Array.from(d).sort();
-        const allP = Array.from(p).sort();
-        const allI = Array.from(i).sort();
-        setAllDoctors(allD);
-        setAllPatients(allP);
-        setAllIcds(allI);
+        setAllDoctors(Array.from(d).sort());
+        setAllPatients(Array.from(p).sort());
+        setAllIcds(Array.from(i).sort());
 
-        // Build master relation maps
         const mapPatByDoc: Record<string, Set<string>> = {};
         const mapDocByPat: Record<string, Set<string>> = {};
         list.forEach((r) => {
@@ -369,7 +401,6 @@ export default function MedicalRecords() {
       } catch (e: any) {
         console.error(e);
       } finally {
-        // trigger first filtered fetch after master loads
         fetchData();
         fetchChartData();
       }
@@ -377,7 +408,7 @@ export default function MedicalRecords() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ============ Close suggestions on outside click ============ */
+  /* ============ outside click ============ */
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (
@@ -390,18 +421,31 @@ export default function MedicalRecords() {
     return () => document.removeEventListener("mousedown", onDoc);
   }, []);
 
-  /* ============ Fetch (filtered) ============ */
-  async function fetchData(opts?: { keepLoading?: boolean }) {
+  /* ============ Fetchers ============ */
+  async function fetchData(opts?: {
+    keepLoading?: boolean;
+    override?: {
+      q?: string;
+      doctor?: string;
+      patient?: string;
+      date?: string;
+      icd?: string;
+      hasSearched?: boolean;
+    };
+  }) {
     try {
       if (!opts?.keepLoading) setLoading(true);
       setErr(null);
 
+      const o = opts?.override;
+      const _hasSearched = o?.hasSearched ?? hasSearched;
+
       const params: Record<string, string> = {};
-      if (hasSearched && q.trim()) params.q = q.trim();
-      if (fDoctor) params.doctor = fDoctor;
-      if (fPatient) params.patient = fPatient;
-      if (singleDate) params.date = singleDate;
-      if (selIcd) params.icd = selIcd;
+      if (_hasSearched && (o?.q ?? q).trim()) params.q = (o?.q ?? q).trim();
+      if (o?.doctor ?? fDoctor) params.doctor = (o?.doctor ?? fDoctor)!;
+      if (o?.patient ?? fPatient) params.patient = (o?.patient ?? fPatient)!;
+      if (o?.date ?? singleDate) params.date = (o?.date ?? singleDate)!;
+      if (o?.icd ?? selIcd) params.icd = (o?.icd ?? selIcd)!;
 
       const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
       const list = (data?.records || []).map((r, i) => ({
@@ -417,13 +461,25 @@ export default function MedicalRecords() {
     }
   }
 
-  async function fetchChartData() {
+  async function fetchChartData(opts?: {
+    override?: {
+      q?: string;
+      doctor?: string;
+      patient?: string;
+      date?: string;
+      icd?: string;
+      hasSearched?: boolean;
+    };
+  }) {
     try {
+      const o = opts?.override;
+      const _hasSearched = o?.hasSearched ?? hasSearched;
+
       const params: Record<string, string> = {};
-      if (hasSearched && q.trim()) params.q = q.trim();
-      if (fPatient) params.patient = fPatient;
-      if (singleDate) params.date = singleDate;
-      if (selIcd) params.icd = selIcd;
+      if (_hasSearched && (o?.q ?? q).trim()) params.q = (o?.q ?? q).trim();
+      if (o?.patient ?? fPatient) params.patient = (o?.patient ?? fPatient)!;
+      if (o?.date ?? singleDate) params.date = (o?.date ?? singleDate)!;
+      if (o?.icd ?? selIcd) params.icd = (o?.icd ?? selIcd)!;
 
       const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
       const list = (data?.records || []).map((r, i) => ({
@@ -442,7 +498,7 @@ export default function MedicalRecords() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fDoctor, fPatient, singleDate, selIcd, hasSearched, q]);
 
-  /* ============ Build context lists using MASTER maps ============ */
+  /* ============ Build context lists ============ */
   useEffect(() => {
     if (!hasSearched) {
       setCtxMode("");
@@ -450,26 +506,21 @@ export default function MedicalRecords() {
       setCtxDoctors([]);
       return;
     }
-
     if (fDoctor) {
-      // use master map so list stays static
       setCtxMode("doctor");
       setCtxPatients(masterPatientsByDoctor[fDoctor] || []);
       setCtxDoctors([]);
       return;
     }
-
     if (fPatient) {
       setCtxMode("patient");
       setCtxDoctors(masterDoctorsByPatient[fPatient] || []);
       setCtxPatients([]);
       return;
     }
-
     const qTitle = toTitle(q.trim());
     const icdExact = allIcds.includes(firstIcd(qTitle) || "");
     if (icdExact) {
-      // for ICD we can still show all doctors who ever had that ICD (from master)
       const docs = Array.from(
         new Set(
           masterAll
@@ -483,7 +534,6 @@ export default function MedicalRecords() {
       setCtxPatients([]);
       return;
     }
-
     setCtxMode("");
     setCtxPatients([]);
     setCtxDoctors([]);
@@ -498,7 +548,7 @@ export default function MedicalRecords() {
     masterDoctorsByPatient,
   ]);
 
-  /* ============ Search logic ============ */
+  /* ============ Search ============ */
   function runSearch(qOverride?: string, prettyText?: string) {
     const text = stripOuterQuotes((qOverride ?? q).trim());
     if (!text) return;
@@ -533,27 +583,46 @@ export default function MedicalRecords() {
       return "";
     };
 
-    // doctor
+    const next = {
+      q: "",
+      doctor: "",
+      patient: "",
+      date: "",
+      icd: "",
+      hasSearched: true,
+    };
+
     if (titledDoctor) {
       const full = allDoctors.find((d) =>
         normalize(d).includes(normalize(titledDoctor))
       );
-      const finalDoc = full || titledDoctor;
-      setFDoctor(finalDoc);
-    } else {
-      const uniqueDoc = resolveFreeDoctor();
-      setFDoctor(uniqueDoc || "");
-    }
+      (next as any).doctor = full || titledDoctor;
+    } else (next as any).doctor = resolveFreeDoctor();
 
-    // patient
-    if (titledPatient) {
-      setFPatient(titledPatient);
-    } else if (!titledDoctor) {
-      const uniquePat = resolveFreePatient();
-      setFPatient(uniquePat || "");
-    }
+    if (titledPatient) (next as any).patient = titledPatient;
+    else if (!(next as any).doctor)
+      (next as any).patient = resolveFreePatient();
 
-    // dates
+    if (pq.from && !pq.to) (next as any).date = pq.from;
+    else if (pq.to && !pq.from) (next as any).date = pq.to;
+    else if (pq.from && pq.to) (next as any).date = pq.from;
+
+    if (!icdToken) icdToken = resolveFreeIcd();
+    (next as any).icd = icdToken || "";
+
+    const free = [(next as any).icd, pq.contract, pq.claim, ...(pq.free || [])]
+      .filter(Boolean)
+      .join(" ")
+      .trim();
+    const shown = stripOuterQuotes(
+      qOverride ? prettyText || text : free ? free : text
+    );
+    (next as any).q = shown;
+
+    setHasSearched(true);
+    setFDoctor((next as any).doctor);
+    setFPatient((next as any).patient);
+    setSelIcd((next as any).icd);
     if (pq.from && !pq.to) {
       setDateFrom(pq.from);
       setDateTo("");
@@ -564,25 +633,9 @@ export default function MedicalRecords() {
       setDateFrom(pq.from);
       setDateTo(pq.to);
     }
+    setQ(shown);
 
-    // ICD
-    if (!icdToken) icdToken = resolveFreeIcd();
-    setSelIcd(icdToken || "");
-
-    // free text
-    const free = [icdToken, pq.contract, pq.claim, ...(pq.free || [])]
-      .filter(Boolean)
-      .join(" ")
-      .trim();
-
-    setHasSearched(true);
-
-    if (qOverride) setQ(stripOuterQuotes(prettyText || text));
-    else setQ(stripOuterQuotes(free ? free : text));
-
-    // history
-    const shown = stripOuterQuotes(prettyText || (free ? free : text));
-    if (shown.trim()) {
+    if (shown) {
       const newRecent = [shown, ...recent.filter((x) => x !== shown)].slice(
         0,
         10
@@ -591,8 +644,8 @@ export default function MedicalRecords() {
       localStorage.setItem("medical_recent", JSON.stringify(newRecent));
     }
 
-    fetchData();
-    fetchChartData();
+    fetchData({ override: next as any });
+    fetchChartData({ override: next as any });
     setShowSuggest(false);
   }
 
@@ -721,7 +774,7 @@ export default function MedicalRecords() {
 
           {/* Header */}
           <div
-            className="rounded-2xl p-5 text-white shadow-soft"
+            className="relative z-50 rounded-2xl p-5 text-white shadow-soft"
             style={{ background: headerGrad }}
           >
             <div className="text-2xl md:text-3xl font-semibold">
@@ -795,43 +848,34 @@ export default function MedicalRecords() {
             {/* Filters */}
             {hasSearched && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                {/* Date controls */}
-                <div className="flex items-center gap-1 bg-white/10 rounded-2xl px-2 py-1">
-                  <div
-                    className="flex items-center gap-2 bg-white rounded-xl px-3 py-1"
-                    style={{ border: "1px solid transparent" }}
-                  >
-                    <CalendarDays className="size-4 text-black/70" />
-                    <input
-                      type="date"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      className="h-9 bg-transparent outline-none text-[13px] text-black"
-                      title="من تاريخ"
-                    />
-                    <span className="text-black/50 text-xs">إلى</span>
-                    <input
-                      type="date"
-                      value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
-                      className="h-9 bg-transparent outline-none text-[13px] text-black"
-                      title="إلى تاريخ"
-                    />
-                  </div>
+                {/* Date chip */}
+                <div className="flex items-center gap-2 rounded-2xl px-2 py-1 bg-[rgba(14,107,67,0.12)] backdrop-blur-sm shadow-sm">
+                  <SingleDateChip
+                    value={singleDate}
+                    onChange={(d) => {
+                      setDateFrom(d);
+                      setDateTo("");
+                    }}
+                    onClear={() => {
+                      setDateFrom("");
+                      setDateTo("");
+                    }}
+                  />
                 </div>
 
                 {(ctxMode === "doctor" ||
                   ctxMode === "icd" ||
                   ctxMode === "patient") && (
-                  <div
-                    className="flex items-center gap-2 bg-white rounded-xl px-3 py-2 border text-black"
-                    style={{ borderColor: theme.border }}
-                  >
-                    <Filter className="size-4 text:black/70" />
-                    <span className="text-sm">فلترة:</span>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-[rgba(14,107,67,0.12)] backdrop-blur-sm shadow-sm">
+                    <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-white bg-white/20 px-2.5 py-1 rounded-full">
+                      <span className="w-6 h-6 grid place-items-center rounded-lg bg-white/25">
+                        <Filter className="size-4 text-white" />
+                      </span>
+                      فلترة
+                    </span>
 
                     {ctxMode === "doctor" && (
-                      <SelectWithArrow
+                      <SoftMenuSelect
                         value={fPatient}
                         onChange={(v) => {
                           setFPatient(v);
@@ -839,13 +883,12 @@ export default function MedicalRecords() {
                         }}
                         title="حسب المريض"
                         placeholder="كل المرضى"
-                        // STATIC list from master map, never shrinks
                         options={masterPatientsByDoctor[fDoctor] || []}
                       />
                     )}
 
                     {ctxMode === "icd" && (
-                      <SelectWithArrow
+                      <SoftMenuSelect
                         value={fDoctor}
                         onChange={(v) => {
                           setFDoctor(v);
@@ -853,12 +896,12 @@ export default function MedicalRecords() {
                         }}
                         title="حسب الطبيب"
                         placeholder="كل الأطباء"
-                        options={ctxDoctors /* ok for ICD */}
+                        options={ctxDoctors}
                       />
                     )}
 
                     {ctxMode === "patient" && (
-                      <SelectWithArrow
+                      <SoftMenuSelect
                         value={fDoctor}
                         onChange={(v) => {
                           setFDoctor(v);
@@ -866,28 +909,19 @@ export default function MedicalRecords() {
                         }}
                         title="حسب الطبيب"
                         placeholder="كل الأطباء"
-                        // STATIC list from master map, never shrinks
                         options={masterDoctorsByPatient[fPatient] || []}
                       />
                     )}
 
-                    {(fDoctor || fPatient || dateFrom || dateTo || selIcd) && (
-                      <button
-                        onClick={() => {
-                          setFDoctor("");
-                          setFPatient("");
-                          setDateFrom("");
-                          setDateTo("");
-                          setSelectedName("");
-                          setSelIcd("");
-                        }}
-                        className="h-9 px-3 rounded-lg text-sm border hover:bg-black/5 text-black"
-                        style={{ borderColor: theme.border }}
-                        title="إزالة جميع الفلاتر"
-                      >
-                        إعادة التعيين
-                      </button>
-                    )}
+                    {/* زر المساعد الذكي */}
+                    <button
+                      onClick={() => navigate("/chat")}
+                      className="ml-2 h-9 px-3 rounded-full bg-[#0D16D1] hover:bg-[#101ce8] text-white text-sm font-semibold shadow-md inline-flex items-center gap-2"
+                      title="المساعد الذكي"
+                    >
+                      <Bot className="size-4" />
+                      المساعد الذكي
+                    </button>
                   </div>
                 )}
               </div>
@@ -901,7 +935,6 @@ export default function MedicalRecords() {
             </div>
           )}
 
-          {/* Show skeleton until first fetch completes */}
           {(!firstLoadDone || loading) && rows.length === 0 ? (
             <div className="mt-6 grid gap-4">
               <div className="h-20 bg-white rounded-2xl animate-pulse" />
@@ -911,30 +944,30 @@ export default function MedicalRecords() {
           ) : null}
 
           {/* KPI Cards */}
-          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 relative z-0">
             <KpiCard
               title="عدد السجلات"
               value={kpis(rows).total}
-              color={theme.kpiBlue}
-              icon={<ClipboardList className="size-5" />}
+              color="#3B82F6"
+              icon={<ClipboardList />}
             />
             <KpiCard
               title="عدد الأطباء"
               value={kpis(rows).doctors}
-              color={theme.kpiYellow}
-              icon={<UserPlus className="size-5" />}
+              color="#D97706"
+              icon={<UserPlus />}
             />
             <KpiCard
               title="عدد المرضى"
               value={kpis(rows).patients}
-              color={theme.kpiRed}
-              icon={<Users className="size-5" />}
+              color="#E05252"
+              icon={<Users />}
             />
             <KpiCard
               title="عدد التنبيهات"
               value={kpis(rows).alerts}
-              color={theme.kpiGreen}
-              icon={<Bell className="size-5" />}
+              color="#0E9F6E"
+              icon={<Bell />}
             />
           </div>
 
@@ -1047,7 +1080,6 @@ export default function MedicalRecords() {
                   </BarChart>
                 </ResponsiveContainer>
               ) : (
-                // ONLY show "no data" after first load is done and not loading
                 firstLoadDone &&
                 !loading && (
                   <div className="h-full grid place-items-center text-neutral-500 text-sm">
@@ -1134,6 +1166,7 @@ function SideItem({
   );
 }
 
+// KPI Card with same-hue gradient (darker -> base -> lighter)
 function KpiCard({
   title,
   value,
@@ -1145,41 +1178,73 @@ function KpiCard({
   color: string;
   icon: React.ReactNode;
 }) {
-  const grad = `linear-gradient(135deg, ${color} 0%, rgba(255,255,255,0.35) 100%)`;
+  const dark = darken(color, 0.35);
+  const mid = color;
+  const light = lighten(color, 0.15);
+  const grad = `linear-gradient(135deg, ${dark} 0%, ${mid} 55%, ${light} 130%)`;
+
   return (
     <div
-      className="relative rounded-2xl text-white p-4 overflow-hidden shadow-soft"
+      className="relative group rounded-2xl text-white p-4 overflow-hidden shadow-soft
+                 transition-transform duration-200 ease-out
+                 hover:-translate-y-[3px] hover:shadow-xl focus-within:-translate-y-[3px]"
       style={{ background: grad }}
+      role="button"
+      tabIndex={0}
     >
       <div className="absolute top-3 left-3">
-        <div className="w-10 h-10 rounded-xl bg-white/25 backdrop-blur-sm grid place-items-center">
-          {icon}
+        <div
+          className="w-11 h-11 rounded-xl grid place-items-center border backdrop-blur-sm shadow-lg"
+          style={{
+            background: "rgba(255,255,255,0.18)",
+            borderColor: "rgba(255,255,255,0.28)",
+          }}
+        >
+          <span className="[&>*]:stroke-[2.25] [&>*]:w-5 [&>*]:h-5 drop-shadow-[0_2px_6px_rgba(0,0,0,.25)]">
+            {icon}
+          </span>
         </div>
       </div>
+
       <svg
-        width="140"
-        height="46"
-        viewBox="0 0 120 40"
-        className="absolute right-6 top-8 opacity-30"
+        width="180"
+        height="64"
+        viewBox="0 0 180 64"
+        className="absolute right-6 top-8 opacity-40 group-hover:opacity-60 transition-opacity"
       >
         <path
-          d="M0,20 C20,0 40,40 60,20 C80,0 100,40 120,20"
+          d="M0,32 C30,4 60,60 90,32 C120,4 150,60 180,32"
           fill="none"
-          stroke="white"
-          strokeWidth="4"
+          stroke="rgba(255,255,255,0.6)"
+          strokeWidth="6"
           strokeLinecap="round"
         />
       </svg>
 
-      <div className="mt-8 text-3xl font-semibold tabular-nums text-right">
-        {value}
+      <div
+        className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{
+          background:
+            "radial-gradient(600px 200px at 130% -30%, rgba(255,255,255,.22), transparent 60%)",
+        }}
+      />
+
+      <div className="mt-10 text-right">
+        <div className="text-4xl leading-none font-extrabold tabular-nums drop-shadow-sm">
+          {value}
+        </div>
+        <div className="mt-1 text-[1.05rem] font-semibold tracking-wide text-white/95">
+          {title}
+        </div>
       </div>
-      <div className="opacity-95 text-right">{title}</div>
+
+      <span className="absolute inset-0 rounded-2xl ring-0 group-focus-visible:ring-2 ring-white/60" />
     </div>
   );
 }
 
-function SelectWithArrow({
+/* منسدلة خضراء بحواف ناعمة ونص أبيض */
+function SoftMenuSelect({
   value,
   onChange,
   options,
@@ -1192,43 +1257,62 @@ function SelectWithArrow({
   placeholder: string;
   title?: string;
 }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
   return (
-    <div className="relative">
-      <svg
-        width="10"
-        height="6"
-        viewBox="0 0 10 6"
-        className="absolute -top-2 left-1/2 -translate-x-1/2"
-        aria-hidden="true"
-      >
-        <path
-          d="M0,6 L5,0 L10,6"
-          fill="none"
-          stroke="#64748B"
-          strokeWidth="1.5"
-        />
-      </svg>
-
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+    <div className="relative z-[60]">
+      <button
+        ref={btnRef}
         title={title}
-        className="h-9 rounded-lg border px-2 text-sm text-black bg-white pr-6 appearance-none"
+        onClick={() => setOpen((o) => !o)}
+        className="h-9 px-3 pr-8 rounded-full text-sm font-semibold
+                   shadow-sm text-white
+                   bg-[rgba(14,107,67,0.30)]
+                   hover:bg-[rgba(14,107,67,0.38)] focus:outline-none
+                   focus:ring-2 focus:ring-emerald-300"
         style={{
-          borderColor: theme.border,
           backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 20 20'%3E%3Cpath fill='%2364748B' d='M5.5 7.5l4.5 5 4.5-5z'/%3E%3C/svg%3E\")",
+            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 20 20'%3E%3Cpath fill='%23FFFFFF' d='M5.5 7.5l4.5 5 4.5-5z'/%3E%3C/svg%3E\")",
           backgroundRepeat: "no-repeat",
-          backgroundPosition: "left 8px center",
+          backgroundPosition: "left 10px center",
         }}
       >
-        <option value="">{placeholder}</option>
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
+        {value || placeholder}
+      </button>
+
+      {open && (
+        <div
+          className="absolute z-[70] mt-2 w-[220px] rounded-xl overflow-hidden
+                     shadow-xl bg-white/95 backdrop-blur-md border border-emerald-200/40"
+          onMouseLeave={() => setOpen(false)}
+        >
+          <button
+            className="w-full text-right px-3 py-2 text-sm font-medium bg-emerald-50/60 text-emerald-900"
+            onClick={() => {
+              onChange("");
+              setOpen(false);
+            }}
+          >
+            {placeholder}
+          </button>
+          <ul className="max-h-[240px] overflow-auto">
+            {options.map((o) => (
+              <li key={o}>
+                <button
+                  className="w-full text-right px-3 py-2 text-[13px] hover:bg-emerald-50 text-[#0B0F14]"
+                  onClick={() => {
+                    onChange(o);
+                    setOpen(false);
+                  }}
+                  title={o}
+                >
+                  {o}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -1320,6 +1404,66 @@ function Field({
   );
 }
 
+/* زر التاريخ — شارة دائرية، بدون حدود بيضاء */
+function SingleDateChip({
+  value,
+  onChange,
+  onClear,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onClear: () => void;
+}) {
+  const ref = React.useRef<HTMLInputElement>(null);
+  const open = () => ref.current?.showPicker?.();
+  const nice = value
+    ? new Date(value + "T00:00:00").toLocaleDateString("ar-SA", {
+        weekday: "short",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      })
+    : "اختر التاريخ";
+
+  return (
+    <div className="relative">
+      <input
+        ref={ref}
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="absolute opacity-0 pointer-events-none"
+        tabIndex={-1}
+        aria-hidden
+      />
+      <button
+        onClick={open}
+        className="h-9 pl-3 pr-2 rounded-full flex items-center gap-2 shadow-sm transition
+                   bg-[rgba(14,107,67,0.13)] hover:bg-[rgba(14,107,67,0.18)]
+                   text-white focus:outline-none focus:ring-2 focus:ring-emerald-300"
+        title="التاريخ"
+      >
+        <span className="w-6 h-6 rounded-full grid place-items-center shadow bg-white/30">
+          <CalendarDays className="size-4 text-white" />
+        </span>
+        <span className="text-sm">{nice}</span>
+        {value && (
+          <span
+            onClick={(e) => {
+              e.stopPropagation();
+              onClear();
+            }}
+            className="ml-1 grid place-items-center w-5 h-5 rounded-full bg-black/10 hover:bg-black/20 text-[12px]"
+            title="مسح التاريخ"
+          >
+            ×
+          </span>
+        )}
+      </button>
+    </div>
+  );
+}
+
 function SearchBar(props: {
   q: string;
   setQ: (v: string) => void;
@@ -1356,7 +1500,6 @@ function SearchBar(props: {
     setActiveIdx,
   } = props;
 
-  // Apply suggestion (blur to hide caret)
   const apply = (s: {
     label: string;
     kind: "doctor" | "patient" | "icd" | "text";
@@ -1370,7 +1513,7 @@ function SearchBar(props: {
     if (s.kind === "patient") override = `p:"${s.label}"`;
     if (s.kind === "icd") override = `icd:"${firstIcd(s.label) || s.label}"`;
 
-    requestAnimationFrame(() => inputRef.current?.blur()); // hide blinking caret
+    requestAnimationFrame(() => inputRef.current?.blur());
     setShowSuggest(false);
     onRunSearch(override, pretty);
   };
@@ -1401,7 +1544,6 @@ function SearchBar(props: {
               setActiveIdx(0);
             }}
             onMouseDown={() => {
-              // 2) Click-to-clear: clear immediately on click to start a fresh search
               if (stripOuterQuotes(q)) {
                 setQ("");
                 setHasSearched(false);
@@ -1443,23 +1585,24 @@ function SearchBar(props: {
               if (e.key === "Enter") onRunSearch();
               if (e.key === "Escape") clearAll();
             }}
-            className="w-full h-12 rounded-2xl pl-10 pr-12 outline-none placeholder:text-black/60"
+            className="w-full h-10 rounded-2xl pl-10 pr-12 outline-none placeholder:text-black/60 backdrop-blur-md"
             style={{
-              background: "#F7FAF9",
+              background: "rgba(255,255,255,0.65)",
               border: `1px solid ${theme.border}`,
-              boxShadow: "inset 0 1px 2px rgba(0,0,0,0.06)",
+              boxShadow:
+                "0 2px 14px rgba(14,107,67,0.08), inset 0 1px 1px rgba(0,0,0,0.04)",
               color: "#111827",
               direction: "auto",
               unicodeBidi: "plaintext",
             }}
-            placeholder="اكتب d: أو p: أو icd: لبحث سريع… أو اكتب نصًا ثم Enter"
+            placeholder="اكتب d: أو p: أو icd: … ثم Enter"
             aria-label="بحث موحّد"
           />
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/70" />
           {q && (
             <button
               onClick={() => setQ("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-black/50 hover:text-black/80"
+              className="absolute right-3 top-1/2 -translate-y-1/2 text:black/50 hover:text-black/80"
               title="مسح النص"
             >
               ×
@@ -1528,14 +1671,14 @@ function SearchBar(props: {
               </ul>
               {recent.length > 0 && (
                 <div className="border-t p-2">
-                  <div className="px-2 pb-1 text-[11px] text-black/60 flex items-center gap-1">
+                  <div className="px-2 pb-1 text:[11px] text-black/60 flex items-center gap-1">
                     <History className="size-3.5" /> عمليات بحث سابقة
                   </div>
                   <div className="px-2 pb-2 flex flex-wrap gap-2">
                     {recent.slice(0, 8).map((r) => (
                       <button
                         key={r}
-                        className="h-7 px-2 rounded-full bg-black/5 text-[12px] hover:bg-black/10"
+                        className="h-7 px-2 rounded-full bg:black/5 text-[12px] hover:bg-black/10"
                         onMouseDown={(e) => {
                           e.preventDefault();
                           const pretty = stripOuterQuotes(r);
@@ -1558,7 +1701,7 @@ function SearchBar(props: {
 
         <button
           onClick={() => onRunSearch()}
-          className="h-12 px-4 rounded-xl text-sm font-semibold shadow-md border"
+          className="h-10 px-4 rounded-xl text-sm font-semibold shadow-md border"
           style={{
             background: "#A7F3D0",
             color: "#0E6B43",
@@ -1567,6 +1710,16 @@ function SearchBar(props: {
           title="بحث"
         >
           بحث
+        </button>
+        <button
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent("med:clearAll"));
+          }}
+          className="h-10 px-4 rounded-xl text-sm hover:bg-black/5"
+          style={{ color: theme.ink, border: `1px solid ${theme.border}` }}
+          title="مسح الكل"
+        >
+          مسح
         </button>
       </div>
     </div>

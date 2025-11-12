@@ -1,211 +1,217 @@
-# Backend/routes/medical_records.py
 from fastapi import APIRouter, Query
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import datetime
+import re
 
 router = APIRouter(prefix="/medical", tags=["Medical Records"])
 
-# ========================== Helpers ==========================
+# ================= Normalization helpers =================
 
-def fix_title_spacing(s: str) -> str:
-    """Dr.Ahmed -> Dr. Ahmed | د.احمد -> د. احمد"""
-    s = str(s or "").strip()
-    s = pd.Series([s]).str.replace(r'(^|\s)(dr)\.(?=[A-Za-z\u0600-\u06FF])', r'\1Dr. ', regex=True, case=False)[0]
-    s = pd.Series([s]).str.replace(r'(^|\s)(د)\.(?=[A-Za-z\u0600-\u06FF])', r'\1د. ', regex=True)[0]
-    return s
+_AR_DIACRITICS = r"[\u064B-\u065F\u0610-\u061A]"
+_ICD_RE = re.compile(r"([A-Za-z]\d{1,2}(?:\.\d+)?)")  # E11 أو E03.9
 
-DROP_TITLES = {"dr", "dr.", "doctor", "د", "د.", "دكتور", "الدكتور"}
+TITLES = {
+    "dr", "dr.", "doctor", "prof", "prof.", "mr", "mrs", "ms",
+    "د", "د.", "دكتور", "الدكتور", "أ.", "أ.د", "بروف", "البروف", "أستاذ",
+}
 
-def strip_titles(s: str) -> str:
-    """يحذف الألقاب من بداية الاسم فقط"""
-    parts = str(s or "").strip().split()
-    while parts and parts[0].lower() in DROP_TITLES:
-        parts.pop(0)
-    return " ".join(parts)
+def _strip_titles_str(txt: str) -> str:
+    s = str(txt or "").strip()
+    s = re.sub(r"[\\\/]+", " ", s)         # \ أو / → مسافة
+    s = re.sub(r"[.,;:_]+", " ", s)        # فواصل كنهايات كلمات
+    parts = re.split(r"\s+", s)
+    out = [p for p in parts if p and p.lower().strip(".") not in TITLES]
+    return " ".join(out).strip()
 
-def ar_en_normalize(s: str) -> str:
-    """تطبيع عربي/إنجليزي ومسافات موحّدة"""
-    s = fix_title_spacing(s)
-    s = str(s or "").lower().strip()
-    # إزالة التشكيل
-    s = pd.Series([s]).str.replace(r"[\u064B-\u065F\u0610-\u061A]", "", regex=True)[0]
-    # أشكال الألف/التاء المربوطة/الياء
-    s = (s
-         .replace("آ", "ا").replace("أ", "ا").replace("إ", "ا")
-         .replace("ى", "ي").replace("ة", "ه"))
-    # شرطات غريبة
-    s = s.replace("‐", "-").replace("–", "-").replace("—", "-")
-    # مسافات
-    s = " ".join(s.split())
-    return s
+def _strip_titles_series(s: pd.Series) -> pd.Series:
+    s = s.astype(str).str.strip()
+    s = s.str.replace(r"[\\\/]+", " ", regex=True)
+    s = s.str.replace(r"[.,;:_]+", " ", regex=True)
+    parts = s.str.split(r"\s+", regex=True)
+    # إزالة الألقاب عنصرًا عنصرًا
+    return parts.apply(lambda lst: " ".join([p for p in lst if p and p.lower().strip(".") not in TITLES]).strip())
 
-def norm_no_titles(s: str) -> str:
-    return ar_en_normalize(strip_titles(s))
+def _norm_common(x):
+    """
+    يطبّع النص عربيًا وإنجليزيًا ويحوّل الفواصل/الشرطات/الـ slash إلى مسافات.
+    يدعم str و Series.
+    """
+    if isinstance(x, pd.Series):
+        s = x.astype(str).str.strip().str.lower()
+        s = s.str.replace(_AR_DIACRITICS, "", regex=True)
+        s = s.str.replace("[آأإ]", "ا", regex=True)
+        s = s.str.replace("ى", "ي", regex=True)
+        s = s.str.replace("ة", "ه", regex=True)
+        s = s.str.replace(r"[‐–—]+", "-", regex=True)
+        s = s.str.replace(r"[\\\/|]+", " ", regex=True)         # \ / | → مسافة
+        s = s.str.replace(r"[(),.;:]+", " ", regex=True)
+        s = s.str.replace(r"\s+", " ", regex=True).str.strip()
+        return s
+    else:
+        s = str(x or "").strip().lower()
+        s = re.sub(_AR_DIACRITICS, "", s)
+        s = s.replace("آ","ا").replace("أ","ا").replace("إ","ا").replace("ى","ي").replace("ة","ه")
+        s = re.sub(r"[‐–—]+", "-", s)
+        s = re.sub(r"[\\\/|]+", " ", s)
+        s = re.sub(r"[(),.;:]+", " ", s)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
 
-def first_icd(code: str) -> str:
-    """يرجع أول كود ICD من الخانة (قبل الفواصل/الأقواس/الأسطر)"""
-    s = str(code or "")
-    s = s.split("\n")[0]
-    for sep in ["|", ";", ",", "،"]:
-        s = s.split(sep)[0]
-    if "(" in s:
-        s = s.split("(")[0]
-    return s.strip()
+def _norm_name(x, drop_titles: bool = True):
+    if isinstance(x, pd.Series):
+        s = _strip_titles_series(x) if drop_titles else x.astype(str)
+        return _norm_common(s)
+    else:
+        base = _strip_titles_str(x) if drop_titles else str(x or "")
+        return _norm_common(base)
 
-# ========================== Data Loader ==========================
+def _norm_icd_str(txt: str) -> str:
+    if not txt:
+        return ""
+    m = _ICD_RE.search(str(txt))
+    return m.group(1).upper() if m else _norm_common(str(txt)).upper()
 
-def load_medical_records():
+def _norm_icd_series(s: pd.Series) -> pd.Series:
+    return s.astype(str).apply(_norm_icd_str)
+
+def _icd_root_str(txt: str) -> str:
+    code = _norm_icd_str(txt)
+    return code.split(".")[0] if code else ""
+
+def _icd_root_series(s: pd.Series) -> pd.Series:
+    return _norm_icd_series(s).str.split(".").str[0]
+
+def _to_datetime_any(x: str):
+    """يتعامل مع: أرقام إكسل، ddmmyyyy, yyyymmdd, 4/9/2025, 04-09-2025, ..."""
+    s = str(x).strip()
+    if not s or s.lower() in ("nan","none"):
+        return pd.NaT
+    # أرقام إكسل نصية مثل 4092025 أو 4092025.0
+    if re.fullmatch(r"\d+(?:\.\d+)?", s):
+        s2 = s.split(".")[0].zfill(8)
+        for fmt in ("%d%m%Y", "%Y%m%d"):
+            try:
+                return datetime.strptime(s2, fmt)
+            except Exception:
+                pass
+    try:
+        return pd.to_datetime(s, errors="coerce", dayfirst=True)
+    except Exception:
+        return pd.NaT
+
+# ================= Load =================
+
+def load_medical_records() -> pd.DataFrame:
     data_path = Path(__file__).resolve().parents[1] / "data" / "medical_records.xlsx"
     df = pd.read_excel(data_path, engine="openpyxl")
 
-    # أعمدة العرض
     columns = [
         "Name", "Patient Name", "Treatment Date", "ICD10CODE",
         "Chief Complaint", "SignificantSignes", "CLAIM_TYPE",
         "REFER_IND", "EMER_IND", "Contract",
-        # قد يوجد تخصص في Unnamed: 42
-        "Unnamed: 42"
     ]
     df = df[[c for c in columns if c in df.columns]].copy()
 
-    # إعادة تسمية
-    rename_map = {
-        "Name": "doctor_name",
-        "Patient Name": "patient_name",
-        "Treatment Date": "treatment_date",
-        "ICD10CODE": "ICD10CODE",
-        "Chief Complaint": "chief_complaint",
-        "SignificantSignes": "significant_signs",
-        "CLAIM_TYPE": "claim_type",
-        "REFER_IND": "refer_ind",
-        "EMER_IND": "emer_ind",
-        "Contract": "contract",
-        "Unnamed: 42": "specialty"
-    }
-    df.rename(columns=rename_map, inplace=True)
+    df.columns = [
+        "doctor_name", "patient_name", "treatment_date", "ICD10CODE",
+        "chief_complaint", "significant_signs", "claim_type",
+        "refer_ind", "emer_ind", "contract",
+    ]
 
-    # التاريخ (4092025.0 / 04092025 / 4/9/2025 ...)
+    # التواريخ
     td = df["treatment_date"].astype(str).str.strip()
-
-    def fix_date(x):
-        x = str(x).strip()
-        # رقم من اكسل (4092025 أو 4092025.0)
-        if x.replace('.', '', 1).isdigit():
-            x = x.split('.')[0].zfill(8)  # 04092025
-            try:
-                return datetime.strptime(x, "%d%m%Y")
-            except Exception:
-                pass
-        # صيغ أخرى
-        try:
-            return pd.to_datetime(x, errors="coerce", dayfirst=True)
-        except Exception:
-            return pd.NaT
-
-    df["treatment_date"] = td.apply(fix_date)
+    df["treatment_date"] = td.apply(_to_datetime_any)
     df["treatment_date_str"] = df["treatment_date"].dt.strftime("%Y-%m-%d").fillna("")
 
-    # أعمدة مطبّعة للبحث
-    base_cols = [
-        "doctor_name", "patient_name", "ICD10CODE", "chief_complaint",
-        "significant_signs", "claim_type", "refer_ind", "emer_ind",
-        "contract", "specialty"
-    ]
-    for col in base_cols:
-        df[f"norm_{col}"] = df[col].astype(str).map(ar_en_normalize)
+    # أعمدة مطبّعة للأسماء
+    df["norm_doctor_name_raw"] = _norm_common(df["doctor_name"])
+    df["norm_doctor_name"]     = _norm_name(df["doctor_name"], drop_titles=True)
+    df["norm_patient_name"]    = _norm_name(df["patient_name"], drop_titles=True)
 
-    # إصدارات بدون ألقاب + أول كود ICD
-    df["norm_doctor_no_title"]  = df["doctor_name"].astype(str).map(norm_no_titles)
-    df["norm_patient_no_title"] = df["patient_name"].astype(str).map(ar_en_normalize)
-    df["icd_first"]      = df["ICD10CODE"].map(first_icd)
-    df["norm_icd_first"] = df["icd_first"].map(ar_en_normalize)
+    # أشكال ICD
+    df["icd_code"]       = _norm_icd_series(df["ICD10CODE"])    # مثال: E11 أو E03.9
+    df["icd_root"]       = _icd_root_series(df["ICD10CODE"])    # مثال: E11
+    df["norm_ICD10CODE"] = _norm_common(df["ICD10CODE"])        # fallback نصي
 
-    # Placeholder لـ AI
+    # باقي الحقول النصية
+    for col in ["chief_complaint", "significant_signs", "claim_type", "refer_ind", "emer_ind", "contract"]:
+        df[f"norm_{col}"] = _norm_common(df[col])
+
     df["ai_analysis"] = "No analysis yet — will be added by AI Agent."
     return df
 
-# ========================== Route ==========================
+# ================= Route =================
 
 @router.get("/records")
 def get_medical_records(
     q: str | None = Query(None, description="General search across all fields"),
     doctor: str | None = Query(None, description="Filter by doctor name"),
     patient: str | None = Query(None, description="Filter by patient name"),
-    icd: str | None = Query(None, description="Filter by first ICD10 code"),
-    specialty: str | None = Query(None, description="Filter by specialty"),
-    date: str | None = Query(None, description="Exact date (YYYY-MM-DD)"),
-    date_from: str | None = Query(None, description="From date (YYYY-MM-DD)"),
-    date_to: str | None = Query(None, description="To date (YYYY-MM-DD)"),
+    date: str | None = Query(None, description="Filter by date (YYYY-MM-DD)"),
+    icd: str | None = Query(None, description="Filter by ICD10 code"),
 ):
     df = load_medical_records()
 
-    # --- التاريخ ---
+    # التاريخ (يوم واحد)
     if date:
         try:
             d = pd.to_datetime(date).date()
             df = df[df["treatment_date"].dt.date == d]
         except Exception:
             pass
-    else:
-        start = pd.to_datetime(date_from, errors="coerce") if date_from else None
-        end   = pd.to_datetime(date_to, errors="coerce") if date_to else None
-        if start is not None:
-            df = df[df["treatment_date"] >= start]
-        if end is not None:
-            df = df[df["treatment_date"] <= end]
 
-    # --- الطبيب ---
+    # فلترة الدكتور: طابق على المطبّع مع وبدون ألقاب
     if doctor:
-        key = norm_no_titles(doctor)
-        if key:
-            m1 = df["norm_doctor_no_title"].str.contains(key, na=False)
-            m2 = df["norm_doctor_name"].str.contains(ar_en_normalize(doctor), na=False)
-            df = df[m1 | m2]
+        k = _norm_name(doctor, drop_titles=True)
+        mask = (
+            df["norm_doctor_name"].str.contains(k, na=False) |
+            df["norm_doctor_name_raw"].str.contains(k, na=False)
+        )
+        df = df[mask]
 
-    # --- المريض ---
+    # فلترة المريض
     if patient:
-        key = ar_en_normalize(patient)
-        if key:
-            df = df[df["norm_patient_no_title"].str.contains(key, na=False) |
-                    df["norm_patient_name"].str.contains(key, na=False)]
+        k = _norm_name(patient, drop_titles=True)
+        df = df[df["norm_patient_name"].str.contains(k, na=False)]
 
-    # --- التخصص (إن وجد) ---
-    if specialty and "norm_specialty" in df.columns:
-        key = ar_en_normalize(specialty)
-        df = df[df["norm_specialty"].str.contains(key, na=False)]
-
-    # --- ICD10 (الكود الأول فقط) ---
+    # فلترة ICD (E11 أو E11.9 أو نص يحوي الكود)
     if icd:
-        key = ar_en_normalize(first_icd(icd))
-        if key:
-            df = df[df["norm_icd_first"].str.contains(key, na=False)]
+        key_code = _norm_icd_str(icd)             # E11 أو E11.9
+        key_root = key_code.split(".")[0] if key_code else ""
+        k_any = _norm_common(icd)
+        mask_icd = (
+            df["icd_code"].str.contains(key_code, na=False) |
+            df["icd_root"].str.contains(key_root, na=False) |
+            df["norm_ICD10CODE"].str.contains(k_any, na=False)
+        )
+        df = df[mask_icd]
 
-    # --- بحث عام ---
+    # البحث العام عبر كل الأعمدة المطبّعة + أشكال ICD
     if q:
-        key = ar_en_normalize(q)
-        norm_cols = [c for c in df.columns if c.startswith("norm_")]
-        if norm_cols:
-            mask = np.column_stack([df[c].str.contains(key, na=False) for c in norm_cols]).any(axis=1)
-            df = df[mask]
+        k = _norm_common(q)
+        k_icd = _norm_icd_str(q)
+        cols = [c for c in df.columns if c.startswith("norm_")]
+        stacks = [df[c].str.contains(k, na=False) for c in cols]
+        if k_icd:
+            stacks += [
+                df["icd_code"].str.contains(k_icd, na=False),
+                df["icd_root"].str.contains(k_icd.split(".")[0], na=False),
+            ]
+        mask = np.column_stack(stacks).any(axis=1)
+        df = df[mask]
 
-    # --- إحصاءات ---
     total_records = int(len(df))
     total_doctors = int(df["doctor_name"].nunique()) if total_records > 0 else 0
     alerts_count = int(((df["emer_ind"].astype(str).str.upper() == "Y") |
                         (df["refer_ind"].astype(str).str.upper() == "Y")).sum())
 
-    # --- ناتج الإرجاع ---
-    out_cols = [
+    out = df[[
         "doctor_name", "patient_name", "treatment_date_str", "ICD10CODE",
         "chief_complaint", "significant_signs", "claim_type",
         "refer_ind", "emer_ind", "contract", "ai_analysis",
-    ]
-    if "specialty" in df.columns:
-        out_cols.append("specialty")
-
-    out = df[out_cols].rename(columns={"treatment_date_str": "treatment_date"})
+    ]].rename(columns={"treatment_date_str": "treatment_date"})
 
     return {
         "total_records": total_records,
@@ -213,4 +219,3 @@ def get_medical_records(
         "alerts_count": alerts_count,
         "records": out.fillna("").to_dict(orient="records"),
     }
-
