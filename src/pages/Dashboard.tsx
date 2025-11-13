@@ -9,6 +9,7 @@ import {
   X,
   Pill,
   Shield,
+  BellRing,
   History,
   CalendarDays,
   Filter,
@@ -16,7 +17,10 @@ import {
   Users,
   UserPlus,
   ClipboardList,
-  Bot,
+  ChevronDown,
+  ChevronUp,
+  AlertTriangle,
+  CornerDownRight,
 } from "lucide-react";
 import clsx from "clsx";
 import {
@@ -30,6 +34,7 @@ import {
   LabelList,
   Cell,
 } from "recharts";
+import SmartChat from "@/components/SmartChat";
 
 /* ===================== Theme ===================== */
 const theme = {
@@ -104,6 +109,26 @@ const normalize = (s: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const stripHonorifics = (s: string) => {
+  const tokens = normalize(s).split(" ").filter(Boolean);
+  const drop = new Set([
+    "dr",
+    "doctor",
+    "prof",
+    "mr",
+    "mrs",
+    "ms",
+    "د",
+    "الدكتور",
+    "بروف",
+    "استاذ",
+  ]);
+  return tokens
+    .filter((t) => !drop.has(t))
+    .join(" ")
+    .trim();
+};
+
 const firstIcd = (s: string) => {
   const m = String(s || "").match(/([A-Za-z]\d{1,2}(?:\.\d+)?)/);
   return m ? m[1].toUpperCase() : "";
@@ -149,13 +174,22 @@ function darken(hex: string, amt = 0.35) {
   return `#${toHex(f(r))}${toHex(f(g))}${toHex(f(b))}`;
 }
 function lighten(hex: string, amt = 0.2) {
-  const h = hex.replace("#", "");
+  let h = hex.replace("#", "").trim();
+  if (h.length === 3)
+    h = h
+      .split("")
+      .map((ch) => ch + ch)
+      .join("");
+  if (!/^[0-9a-fA-F]{6}$/.test(h)) throw new Error("Invalid hex color");
+
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);
+
   const F = (v: number) =>
     Math.max(0, Math.min(255, Math.round(v + (255 - v) * amt)));
   const H = (v: number) => v.toString(16).padStart(2, "0");
+
   return `#${H(F(r))}${H(F(g))}${H(F(b))}`;
 }
 
@@ -289,11 +323,11 @@ export default function MedicalRecords() {
   const [firstLoadDone, setFirstLoadDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // table/cards
+  // data
   const [rows, setRows] = useState<MedRow[]>([]);
   const [chartRows, setChartRows] = useState<MedRow[]>([]);
 
-  // master
+  // master + suggestions
   const [masterAll, setMasterAll] = useState<MedRow[]>([]);
   const [masterPatientsByDoctor, setMasterPatientsByDoctor] = useState<
     Record<string, string[]>
@@ -301,8 +335,6 @@ export default function MedicalRecords() {
   const [masterDoctorsByPatient, setMasterDoctorsByPatient] = useState<
     Record<string, string[]>
   >({});
-
-  // suggestions pools
   const [allDoctors, setAllDoctors] = useState<string[]>([]);
   const [allPatients, setAllPatients] = useState<string[]>([]);
   const [allIcds, setAllIcds] = useState<string[]>([]);
@@ -312,7 +344,7 @@ export default function MedicalRecords() {
   const [ctxPatients, setCtxPatients] = useState<string[]>([]);
   const [ctxDoctors, setCtxDoctors] = useState<string[]>([]);
 
-  // search
+  // search state
   const [q, setQ] = useState("");
   const [hasSearched, setHasSearched] = useState(false);
   const [recent, setRecent] = useState<string[]>(
@@ -332,8 +364,6 @@ export default function MedicalRecords() {
   const [dateTo, setDateTo] = useState<string>("");
   const [fDoctor, setFDoctor] = useState<string>("");
   const [fPatient, setFPatient] = useState<string>("");
-
-  // ICD
   const [selIcd, setSelIcd] = useState<string>("");
 
   // chart focus
@@ -347,6 +377,18 @@ export default function MedicalRecords() {
     () => dateFrom || dateTo || "",
     [dateFrom, dateTo]
   );
+
+  /* expose setters for instant UI update from SearchBar.apply */
+  useEffect(() => {
+    (window as any).setFDoctor = setFDoctor;
+    (window as any).setFPatient = setFPatient;
+    (window as any).setSelIcd = setSelIcd;
+    return () => {
+      delete (window as any).setFDoctor;
+      delete (window as any).setFPatient;
+      delete (window as any).setSelIcd;
+    };
+  }, [setFDoctor, setFPatient, setSelIcd]);
 
   /* ============ Boot ============ */
   useEffect(() => {
@@ -422,6 +464,12 @@ export default function MedicalRecords() {
   }, []);
 
   /* ============ Fetchers ============ */
+  async function httpFetch(
+    params: Record<string, string>
+  ): Promise<RecordsResponse> {
+    return httpGet<RecordsResponse>(ENDPOINTS.records, params);
+  }
+
   async function fetchData(opts?: {
     keepLoading?: boolean;
     override?: {
@@ -447,7 +495,18 @@ export default function MedicalRecords() {
       if (o?.date ?? singleDate) params.date = (o?.date ?? singleDate)!;
       if (o?.icd ?? selIcd) params.icd = (o?.icd ?? selIcd)!;
 
-      const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
+      let data = await httpFetch(params);
+
+      // ✅ Fallback لو 0 نتائج والطبيب محدد
+      if ((data?.records?.length ?? 0) === 0 && (params.doctor || "").trim()) {
+        const shortDoctor = toTitle(stripHonorifics(params.doctor));
+        if (shortDoctor && shortDoctor !== params.doctor) {
+          const altParams = { ...params, doctor: shortDoctor };
+          const alt = await httpFetch(altParams);
+          if ((alt?.records?.length ?? 0) > 0) data = alt;
+        }
+      }
+
       const list = (data?.records || []).map((r, i) => ({
         id: r.id ?? i + 1,
         ...r,
@@ -480,8 +539,20 @@ export default function MedicalRecords() {
       if (o?.patient ?? fPatient) params.patient = (o?.patient ?? fPatient)!;
       if (o?.date ?? singleDate) params.date = (o?.date ?? singleDate)!;
       if (o?.icd ?? selIcd) params.icd = (o?.icd ?? selIcd)!;
+      if (o?.doctor ?? fDoctor) params.doctor = (o?.doctor ?? fDoctor)!;
 
-      const data = await httpGet<RecordsResponse>(ENDPOINTS.records, params);
+      let data = await httpFetch(params);
+
+      // ✅ Fallback مشابه للشارت
+      if ((data?.records?.length ?? 0) === 0 && (params.doctor || "").trim()) {
+        const shortDoctor = toTitle(stripHonorifics(params.doctor));
+        if (shortDoctor && shortDoctor !== params.doctor) {
+          const altParams = { ...params, doctor: shortDoctor };
+          const alt = await httpFetch(altParams);
+          if ((alt?.records?.length ?? 0) > 0) data = alt;
+        }
+      }
+
       const list = (data?.records || []).map((r, i) => ({
         id: r.id ?? i + 1,
         ...r,
@@ -559,9 +630,13 @@ export default function MedicalRecords() {
     let icdToken = pq.icd ? firstIcd(pq.icd) : "";
 
     const resolveFreeDoctor = () => {
-      const key = normalize(text);
-      const exact = allDoctors.find((d) => normalize(d) === key);
-      const contains = allDoctors.filter((d) => normalize(d).includes(key));
+      const key = stripHonorifics(text);
+      const exact = allDoctors.find(
+        (d) => normalize(stripHonorifics(d)) === normalize(key)
+      );
+      const contains = allDoctors.filter((d) =>
+        normalize(stripHonorifics(d)).includes(normalize(key))
+      );
       if (exact) return exact;
       if (contains.length === 1 && key.length >= 2) return contains[0];
       return "";
@@ -589,26 +664,50 @@ export default function MedicalRecords() {
       patient: "",
       date: "",
       icd: "",
-      hasSearched: true,
+      hasSearched: true as const,
     };
 
+    // ----- strict priority matching -----
     if (titledDoctor) {
-      const full = allDoctors.find((d) =>
-        normalize(d).includes(normalize(titledDoctor))
+      const key = normalize(stripHonorifics(titledDoctor));
+      const exact = allDoctors.find(
+        (d) => normalize(stripHonorifics(d)) === key
       );
-      (next as any).doctor = full || titledDoctor;
-    } else (next as any).doctor = resolveFreeDoctor();
+      const starts = allDoctors.find((d) =>
+        normalize(stripHonorifics(d)).startsWith(key)
+      );
+      const contains = allDoctors.find((d) =>
+        normalize(stripHonorifics(d)).includes(key)
+      );
+      (next as any).doctor = exact || starts || contains || titledDoctor;
+    } else {
+      (next as any).doctor = resolveFreeDoctor();
+    }
 
-    if (titledPatient) (next as any).patient = titledPatient;
-    else if (!(next as any).doctor)
+    if (titledPatient) {
+      const key = normalize(titledPatient);
+      const exact = allPatients.find((p) => normalize(p) === key);
+      const starts = allPatients.find((p) => normalize(p).startsWith(key));
+      const contains = allPatients.find((p) => normalize(p).includes(key));
+      (next as any).patient = exact || starts || contains || titledPatient;
+    } else if (!(next as any).doctor) {
       (next as any).patient = resolveFreePatient();
+    }
 
     if (pq.from && !pq.to) (next as any).date = pq.from;
     else if (pq.to && !pq.from) (next as any).date = pq.to;
     else if (pq.from && pq.to) (next as any).date = pq.from;
 
     if (!icdToken) icdToken = resolveFreeIcd();
-    (next as any).icd = icdToken || "";
+    if (icdToken) {
+      const key = normalize(icdToken);
+      const exact = allIcds.find((i) => normalize(i) === key);
+      const starts = allIcds.find((i) => normalize(i).startsWith(key));
+      const contains = allIcds.find((i) => normalize(i).includes(key));
+      (next as any).icd = exact || starts || contains || icdToken;
+    } else {
+      (next as any).icd = "";
+    }
 
     const free = [(next as any).icd, pq.contract, pq.claim, ...(pq.free || [])]
       .filter(Boolean)
@@ -647,6 +746,330 @@ export default function MedicalRecords() {
     fetchData({ override: next as any });
     fetchChartData({ override: next as any });
     setShowSuggest(false);
+  }
+
+  /* ======== Show All (عرض الكل) ======== */
+  function resetToAll() {
+    setQ("");
+    setFDoctor("");
+    setFPatient("");
+    setSelIcd("");
+    setDateFrom("");
+    setDateTo("");
+    setHasSearched(false);
+    setSelectedName("");
+    fetchData({
+      keepLoading: true,
+      override: {
+        q: "",
+        doctor: "",
+        patient: "",
+        date: "",
+        icd: "",
+        hasSearched: false,
+      },
+    });
+    fetchChartData({
+      override: {
+        q: "",
+        doctor: "",
+        patient: "",
+        date: "",
+        icd: "",
+        hasSearched: false,
+      },
+    });
+    window.dispatchEvent(new CustomEvent("med:cleared"));
+  }
+
+  /* ===================== Search Bar ===================== */
+  function SearchBar(props: {
+    q: string;
+    setQ: (v: string) => void;
+    setHasSearched: (v: boolean) => void;
+    suggestRef: React.RefObject<HTMLDivElement>;
+    inputRef: React.RefObject<HTMLInputElement>;
+    suggestItems: {
+      label: string;
+      kind: "doctor" | "patient" | "icd" | "text";
+    }[];
+    didYouMean: string;
+    recent: string[];
+    setRecent: (v: string[]) => void;
+    onRunSearch: (override?: string, prettyText?: string) => void;
+    onShowAll: () => void;
+    showSuggest: boolean;
+    setShowSuggest: (b: boolean) => void;
+    activeIdx: number;
+    setActiveIdx: (n: number) => void;
+  }) {
+    const {
+      q,
+      setQ,
+      setHasSearched,
+      suggestRef,
+      inputRef,
+      suggestItems,
+      didYouMean,
+      recent,
+      setRecent,
+      onRunSearch,
+      onShowAll,
+      showSuggest,
+      setShowSuggest,
+      activeIdx,
+      setActiveIdx,
+    } = props;
+
+    // keep scroll position in suggest list to avoid jumping
+    const listRef = React.useRef<HTMLUListElement>(null);
+    const savedScroll = React.useRef(0);
+    React.useEffect(() => {
+      const el = listRef.current;
+      if (el) el.scrollTop = savedScroll.current;
+    }, [suggestItems.length, showSuggest]);
+
+    const apply = (s: {
+      label: string;
+      kind: "doctor" | "patient" | "icd" | "text";
+    }) => {
+      const pretty = s.label.replace(/^"|"$/g, "");
+      setQ(pretty);
+      setHasSearched(true);
+
+      // update filters immediately to refresh header/chart
+      if (s.kind === "doctor") {
+        (window as any).setFDoctor?.(pretty);
+      }
+      if (s.kind === "patient") {
+        (window as any).setFPatient?.(pretty);
+      }
+      if (s.kind === "icd") {
+        (window as any).setSelIcd?.(pretty);
+      }
+
+      let override = s.label;
+      if (s.kind === "doctor") override = `d:"${s.label}"`;
+      if (s.kind === "patient") override = `p:"${s.label}"`;
+      if (s.kind === "icd") override = `icd:"${s.label}"`;
+
+      requestAnimationFrame(() => inputRef.current?.blur());
+      setShowSuggest(false);
+      onRunSearch(override, pretty);
+    };
+
+    useEffect(() => {
+      const handler = () => setShowSuggest(false);
+      window.addEventListener("med:cleared", handler);
+      return () => window.removeEventListener("med:cleared", handler);
+    }, [setShowSuggest]);
+
+    return (
+      <div className="mt-4 relative z-[70]" ref={suggestRef}>
+        <div className="flex items-center gap-2">
+          <div className="relative w-full">
+            <input
+              ref={inputRef}
+              dir="auto"
+              value={q.replace(/^[\s"“”'‚‹›«»]+|[\s"“”'‚‹›«»]+$/g, "")}
+              onChange={(e) => {
+                setQ(
+                  e.target.value.replace(/^[\s"“”'‚‹›«»]+|[\s"“”'‚‹›«»]+$/g, "")
+                );
+                setShowSuggest(true);
+                // keep current activeIdx to avoid scroll reset
+              }}
+              onMouseDown={() => {
+                if (q.trim()) setQ("");
+              }}
+              onFocus={() => {
+                setShowSuggest(true);
+                // DO NOT reset activeIdx here (prevents jump)
+              }}
+              onKeyDown={(e) => {
+                if (
+                  showSuggest &&
+                  (e.key === "ArrowDown" ||
+                    e.key === "ArrowUp" ||
+                    e.key === "Tab" ||
+                    e.key === "Enter")
+                ) {
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setActiveIdx(
+                      Math.min(activeIdx + 1, suggestItems.length - 1)
+                    );
+                    return;
+                  }
+                  if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setActiveIdx(Math.max(activeIdx - 1, 0));
+                    return;
+                  }
+                  if (
+                    (e.key === "Enter" || e.key === "Tab") &&
+                    suggestItems[activeIdx]
+                  ) {
+                    e.preventDefault();
+                    apply(suggestItems[activeIdx]);
+                    return;
+                  }
+                }
+                if (e.key === "Enter") onRunSearch();
+                if (e.key === "Escape") onShowAll();
+              }}
+              className="w-full h-11 rounded-xl pl-10 pr-12 outline-none placeholder:text-emerald-100 text-white transition focus:ring-2 focus:ring-emerald-300"
+              style={{
+                background: "rgba(255, 255, 255, 0.12)",
+                border: "1px solid rgba(255, 255, 255, 0.25)",
+                boxShadow: "inset 0 1px 3px rgba(0,0,0,0.15)",
+                backdropFilter: "blur(6px)",
+                direction: "auto",
+                unicodeBidi: "plaintext",
+              }}
+              placeholder="ابحث باسم طبيب/مريض أو ICD… ثم Enter"
+              aria-label="بحث موحّد"
+            />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-white/90" />
+            {q && (
+              <button
+                onClick={() => setQ("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-white/80 hover:text-white"
+                title="حذف النص"
+              >
+                ×
+              </button>
+            )}
+
+            {showSuggest && (
+              <div
+                className="absolute z-[80] mt-2 w-full rounded-xl shadow-2xl overflow-hidden"
+                onMouseDown={(e) => e.preventDefault()}
+                style={{
+                  background: "rgba(255,255,255,0.96)",
+                  backdropFilter: "blur(6px)",
+                  border: "1px solid rgba(14,107,67,0.25)",
+                }}
+              >
+                {didYouMean && (
+                  <div className="px-3 py-2 text-[12px] text-[#9A4A07] bg-[#FFF6E3]">
+                    هل تقصدين:{" "}
+                    <button
+                      className="underline font-semibold"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        const pretty = didYouMean.replace(/^"|"$/g, "");
+                        setQ(pretty);
+                        setShowSuggest(false);
+                        requestAnimationFrame(() => inputRef.current?.blur());
+                        onRunSearch(didYouMean, pretty);
+                      }}
+                    >
+                      {didYouMean}
+                    </button>{" "}
+                    ؟
+                  </div>
+                )}
+                <ul
+                  ref={listRef}
+                  className="max-h-[260px] overflow-auto"
+                  onScroll={(e) =>
+                    (savedScroll.current = (
+                      e.target as HTMLUListElement
+                    ).scrollTop)
+                  }
+                >
+                  {suggestItems.length > 0 ? (
+                    suggestItems.map((s, i) => (
+                      <li key={`${s.kind}-${s.label}`}>
+                        <button
+                          className={clsx(
+                            "w-full text-right px-4 py-2 text-[13px] leading-6 hover:bg-emerald-50 flex items-center justify-between",
+                            i === activeIdx && "bg-emerald-50"
+                          )}
+                          style={{ color: "#0B0F14" }}
+                          // NOTE: removed onMouseEnter to avoid re-renders that reset scroll
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            apply(s);
+                          }}
+                          title={s.label}
+                        >
+                          <span className="truncate">{s.label}</span>
+                          <span className="text-[11px] text-black/60">
+                            {s.kind === "doctor"
+                              ? "doctor"
+                              : s.kind === "patient"
+                              ? "patient"
+                              : s.kind === "icd"
+                              ? "icd"
+                              : "text"}
+                          </span>
+                        </button>
+                      </li>
+                    ))
+                  ) : (
+                    <div className="px-4 py-3 text-sm text-neutral-500">
+                      لا توجد اقتراحات
+                    </div>
+                  )}
+                </ul>
+                {recent.length > 0 && (
+                  <div
+                    className="border-t p-2"
+                    style={{ borderColor: "rgba(14,107,67,0.18)" }}
+                  >
+                    <div className="px-2 pb-1 text-[11px] text-black/80 flex items-center gap-1">
+                      <History className="size-3.5" /> عمليات بحث سابقة
+                    </div>
+                    <div className="px-2 pb-2 flex flex-wrap gap-2">
+                      {recent.slice(0, 8).map((r) => (
+                        <button
+                          key={r}
+                          className="h-7 px-2 rounded-full bg-black/5 text-[12px] hover:bg-black/10 text-black font-medium"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            const pretty = r.replace(/^"|"$/g, "");
+                            setQ(pretty);
+                            setShowSuggest(false);
+                            requestAnimationFrame(() =>
+                              inputRef.current?.blur()
+                            );
+                            onRunSearch(r, pretty);
+                          }}
+                          title={r}
+                        >
+                          {r}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => onRunSearch()}
+            className="h-11 px-4 rounded-xl text-sm font-semibold shadow-md border text-white"
+            style={{ background: "#36D399", borderColor: "transparent" }}
+            title="بحث"
+          >
+            بحث
+          </button>
+
+          {/* 🔶 عرض الكل بدل مسح */}
+          <button
+            onClick={onShowAll}
+            className="h-11 px-4 rounded-xl text-sm border text-white hover:bg-white/10"
+            style={{ borderColor: "rgba(255,255,255,0.28)" }}
+            title="عرض الكل"
+          >
+            عرض الكل
+          </button>
+        </div>
+      </div>
+    );
   }
 
   /* ============ Chart ============ */
@@ -713,7 +1136,39 @@ export default function MedicalRecords() {
     return "عدد السجلات لكل طبيب";
   }, [chartMode, fDoctor, fPatient]);
 
-  /* ===================== UI ===================== */
+  // ======= Priority list (red, neat) =======
+  const priorityItems = useMemo(() => {
+    const items = rows
+      .filter(
+        (r) =>
+          (r.emer_ind || "").toUpperCase() === "Y" ||
+          (r.refer_ind || "").toUpperCase() === "Y"
+      )
+      .map((r) => ({
+        id: String(r.id ?? `${r.patient_name}-${r.treatment_date}`),
+        doctor: toTitle(r.doctor_name),
+        patient: toTitle(r.patient_name),
+        date: r.treatment_date || "",
+        kind:
+          (r.emer_ind || "").toUpperCase() === "Y"
+            ? "عاجل"
+            : (r.refer_ind || "").toUpperCase() === "Y"
+            ? "تحويل"
+            : "",
+        complaint: brief(r.chief_complaint, 120),
+      }));
+    // sort: عاجل first, then تحويل, then by date desc
+    const score = (k: string) => (k === "عاجل" ? 2 : k === "تحويل" ? 1 : 0);
+    return items.sort(
+      (a, b) =>
+        score(b.kind) - score(a.kind) ||
+        (b.date || "").localeCompare(a.date || "")
+    );
+  }, [rows]);
+
+  const [prioOpen, setPrioOpen] = useState(true);
+  const [prioLimit, setPrioLimit] = useState(8);
+
   return (
     <div className="min-h-screen" style={{ background: pageBg }}>
       <div className="grid grid-cols-[280px_1fr]">
@@ -743,6 +1198,11 @@ export default function MedicalRecords() {
                 label="السجلات الدوائية"
                 onClick={() => navigate("/drugs")}
               />
+              <SideItem
+                icon={<BellRing className="size-4" />}
+                label="الإشعارات"
+                onClick={() => navigate("/notifications")}
+              />
             </nav>
           </div>
           <div className="mt-auto px-4 pt-10 pb-6">
@@ -752,7 +1212,7 @@ export default function MedicalRecords() {
                 sessionStorage.removeItem("haseef_auth");
                 navigate("/");
               }}
-              className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg:black/5"
+              className="w-full flex items-center gap-2 justify-between rounded-xl border px-4 py-3 text-right hover:bg-black/5"
             >
               <span className="text-black/80">تسجيل الخروج</span>
               <LogOut className="size-4" />
@@ -762,28 +1222,39 @@ export default function MedicalRecords() {
 
         {/* Content */}
         <main className="p-6 md:p-8 relative" dir="rtl">
-          {/* Back */}
-          <button
-            onClick={() => navigate("/home")}
-            className="absolute top-4 right-4 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
-            title="العودة للصفحة الرئيسية"
-            aria-label="العودة للصفحة الرئيسية"
-          >
-            <Home className="size-5" style={{ color: theme.brandDark }} />
-          </button>
-
           {/* Header */}
           <div
             className="relative z-50 rounded-2xl p-5 text-white shadow-soft"
             style={{ background: headerGrad }}
           >
+            {/* زر الهوم أعلى الهيدر */}
+            <button
+              onClick={() => navigate("/home")}
+              className="absolute top-3 left-3 p-2 bg-white border border-black/10 rounded-full shadow-md hover:bg-emerald-50 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300"
+              title="العودة للصفحة الرئيسية"
+              aria-label="العودة للصفحة الرئيسية"
+            >
+              <Home className="size-5" style={{ color: theme.brandDark }} />
+            </button>
+
             <div className="text-2xl md:text-3xl font-semibold">
               السجلات الطبية
             </div>
-            <div className="text-white/90 text-sm mt-1">
-              للمختصّين: يمكن استخدام الصياغة المختصرة مثل{" "}
-              <b>d:Mohamed p:Yosef icd:E11 from:2025-01-01 to:2025-01-31</b> أو
-              استخدموا البحث العادي ثم Enter.
+
+            {/* Always-visible date */}
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <SingleDateChip
+                value={singleDate}
+                onChange={(d) => {
+                  setHasSearched(true);
+                  setDateFrom(d);
+                  setDateTo("");
+                }}
+                onClear={() => {
+                  setDateFrom("");
+                  setDateTo("");
+                }}
+              />
             </div>
 
             {/* Search */}
@@ -839,35 +1310,21 @@ export default function MedicalRecords() {
               recent={recent}
               setRecent={setRecent}
               onRunSearch={(o?: string, p?: string) => runSearch(o, p)}
+              onShowAll={resetToAll}
               setShowSuggest={setShowSuggest}
               showSuggest={showSuggest}
               activeIdx={activeIdx}
               setActiveIdx={setActiveIdx}
             />
 
-            {/* Filters */}
+            {/* Filters (after search) */}
             {hasSearched && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
-                {/* Date chip */}
-                <div className="flex items-center gap-2 rounded-2xl px-2 py-1 bg-[rgba(14,107,67,0.12)] backdrop-blur-sm shadow-sm">
-                  <SingleDateChip
-                    value={singleDate}
-                    onChange={(d) => {
-                      setDateFrom(d);
-                      setDateTo("");
-                    }}
-                    onClear={() => {
-                      setDateFrom("");
-                      setDateTo("");
-                    }}
-                  />
-                </div>
-
                 {(ctxMode === "doctor" ||
                   ctxMode === "icd" ||
                   ctxMode === "patient") && (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-[rgba(14,107,67,0.12)] backdrop-blur-sm shadow-sm">
-                    <span className="inline-flex items-center gap-1.5 text-[13px] font-medium text-white bg-white/20 px-2.5 py-1 rounded-full">
+                    <span className="inline-flex items-center gap-2 text-[13px] font-medium text-white bg-white/20 px-2.5 py-1 rounded-full">
                       <span className="w-6 h-6 grid place-items-center rounded-lg bg-white/25">
                         <Filter className="size-4 text-white" />
                       </span>
@@ -912,16 +1369,6 @@ export default function MedicalRecords() {
                         options={masterDoctorsByPatient[fPatient] || []}
                       />
                     )}
-
-                    {/* زر المساعد الذكي */}
-                    <button
-                      onClick={() => navigate("/chat")}
-                      className="ml-2 h-9 px-3 rounded-full bg-[#0D16D1] hover:bg-[#101ce8] text-white text-sm font-semibold shadow-md inline-flex items-center gap-2"
-                      title="المساعد الذكي"
-                    >
-                      <Bot className="size-4" />
-                      المساعد الذكي
-                    </button>
                   </div>
                 )}
               </div>
@@ -971,7 +1418,81 @@ export default function MedicalRecords() {
             />
           </div>
 
-          {/* Chart */}
+          {/* Priority List (Red) */}
+          {priorityItems.length > 0 && (
+            <div
+              className="mt-6 rounded-2xl border shadow-soft p-4"
+              style={{ borderColor: "#FECACA", background: "#FEF2F2" }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-red-800">
+                  <AlertTriangle className="size-5" />
+                  <div className="font-semibold">قائمة الأولويات</div>
+                </div>
+                <button
+                  className="text-red-700 hover:text-red-900 text-sm inline-flex items-center gap-1"
+                  onClick={() => setPrioOpen((v) => !v)}
+                >
+                  {prioOpen ? (
+                    <>
+                      إخفاء <ChevronUp className="size-4" />
+                    </>
+                  ) : (
+                    <>
+                      عرض <ChevronDown className="size-4" />
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {prioOpen && (
+                <ul className="mt-3 space-y-2">
+                  {priorityItems.slice(0, prioLimit).map((p) => (
+                    <li
+                      key={p.id}
+                      className="rounded-xl border px-3 py-2 bg-white flex flex-wrap items-center gap-x-3 gap-y-1"
+                      style={{ borderColor: "#FECACA" }}
+                      title={`${p.patient} • ${p.doctor}`}
+                    >
+                      <span
+                        className="text-xs font-bold px-2 py-1 rounded-full"
+                        style={{
+                          background: p.kind === "عاجل" ? "#FEE2E2" : "#FFE4E6",
+                          color: p.kind === "عاجل" ? "#B91C1C" : "#BE123C",
+                          border: "1px solid #FECACA",
+                        }}
+                      >
+                        {p.kind}
+                      </span>
+                      <span className="text-sm text-red-900">{p.patient}</span>
+                      <CornerDownRight className="size-4 text-red-400" />
+                      <span className="text-sm text-red-900">{p.doctor}</span>
+                      <span className="text-xs text-red-700/80 ml-auto tabular-nums">
+                        {p.date}
+                      </span>
+                      {p.complaint && (
+                        <div className="w-full text-[12px] text-red-700/90 leading-6">
+                          {p.complaint}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                  {priorityItems.length > prioLimit && (
+                    <li className="pt-1">
+                      <button
+                        className="text-red-700 hover:text-red-900 text-sm"
+                        onClick={() => setPrioLimit((n) => n + 8)}
+                      >
+                        عرض المزيد…
+                      </button>
+                    </li>
+                  )}
+                </ul>
+              )}
+            </div>
+          )}
+
+          {/* Chart (Orange bars) */}
           <div
             className="mt-6 rounded-2xl bg-white shadow-soft p-5 border"
             style={{ borderColor: theme.border }}
@@ -1007,15 +1528,21 @@ export default function MedicalRecords() {
                       stroke="#E5E7EB"
                     />
                     <defs>
-                      <linearGradient id="barGrad" x1="0" y1="0" x2="0" y2="1">
+                      <linearGradient
+                        id="barGradOrange"
+                        x1="0"
+                        y1="0"
+                        x2="0"
+                        y2="1"
+                      >
                         <stop
                           offset="0%"
-                          stopColor="#34D399"
+                          stopColor="#FDBA74"
                           stopOpacity={0.95}
                         />
                         <stop
                           offset="100%"
-                          stopColor={theme.brandDark}
+                          stopColor="#D97706"
                           stopOpacity={0.95}
                         />
                       </linearGradient>
@@ -1063,9 +1590,9 @@ export default function MedicalRecords() {
                         return (
                           <Cell
                             key={`cell-${i}`}
-                            fill="url(#barGrad)"
+                            fill="url(#barGradOrange)"
                             fillOpacity={active ? 1 : 0.25}
-                            stroke={active ? "#34D399" : "transparent"}
+                            stroke={active ? "#F59E0B" : "transparent"}
                             strokeWidth={active ? 1.2 : 0}
                           />
                         );
@@ -1090,14 +1617,14 @@ export default function MedicalRecords() {
             </div>
           </div>
 
-          {/* Cards */}
+          {/* Detailed Cards */}
           <div className="mt-6 grid grid-cols-1 gap-4 print:gap-2">
             {firstLoadDone && !loading && rows.length === 0 ? (
               <div
-                className="h-[160px] grid place-items-center text-neutral-500 text-sm border rounded-2xl bg-white"
+                className="h-[140px] grid place-items-center text-neutral-500 text-sm border rounded-2xl bg-white"
                 style={{ borderColor: theme.border }}
               >
-                لا توجد بيانات مطابقة — عدّلي مفتاح البحث أو الفلاتر
+                لا توجد بيانات مطابقة — غيّري التاريخ أو البحث.
               </div>
             ) : (
               rows.map((r) => (
@@ -1108,6 +1635,13 @@ export default function MedicalRecords() {
               ))
             )}
           </div>
+
+          {/* Chat button / drawer */}
+          <SmartChat
+            placement="left"
+            themeColor={theme.brandDark}
+            context="medical"
+          />
         </main>
       </div>
     </div>
@@ -1166,7 +1700,7 @@ function SideItem({
   );
 }
 
-// KPI Card with same-hue gradient (darker -> base -> lighter)
+// KPI Card with same-hue gradient
 function KpiCard({
   title,
   value,
@@ -1185,9 +1719,7 @@ function KpiCard({
 
   return (
     <div
-      className="relative group rounded-2xl text-white p-4 overflow-hidden shadow-soft
-                 transition-transform duration-200 ease-out
-                 hover:-translate-y-[3px] hover:shadow-xl focus-within:-translate-y-[3px]"
+      className="relative group rounded-2xl text-white p-4 overflow-hidden shadow-soft transition-transform duration-200 ease-out hover:-translate-y-[3px] hover:shadow-xl"
       style={{ background: grad }}
       role="button"
       tabIndex={0}
@@ -1221,14 +1753,6 @@ function KpiCard({
         />
       </svg>
 
-      <div
-        className="pointer-events-none absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity"
-        style={{
-          background:
-            "radial-gradient(600px 200px at 130% -30%, rgba(255,255,255,.22), transparent 60%)",
-        }}
-      />
-
       <div className="mt-10 text-right">
         <div className="text-4xl leading-none font-extrabold tabular-nums drop-shadow-sm">
           {value}
@@ -1237,13 +1761,10 @@ function KpiCard({
           {title}
         </div>
       </div>
-
-      <span className="absolute inset-0 rounded-2xl ring-0 group-focus-visible:ring-2 ring-white/60" />
     </div>
   );
 }
 
-/* منسدلة خضراء بحواف ناعمة ونص أبيض */
 function SoftMenuSelect({
   value,
   onChange,
@@ -1265,11 +1786,7 @@ function SoftMenuSelect({
         ref={btnRef}
         title={title}
         onClick={() => setOpen((o) => !o)}
-        className="h-9 px-3 pr-8 rounded-full text-sm font-semibold
-                   shadow-sm text-white
-                   bg-[rgba(14,107,67,0.30)]
-                   hover:bg-[rgba(14,107,67,0.38)] focus:outline-none
-                   focus:ring-2 focus:ring-emerald-300"
+        className="h-9 px-3 pr-8 rounded-full text-sm font-semibold shadow-sm text-white bg-[rgba(14,107,67,0.30)] hover:bg-[rgba(14,107,67,0.38)] focus:outline-none focus:ring-2 focus:ring-emerald-300"
         style={{
           backgroundImage:
             "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 20 20'%3E%3Cpath fill='%23FFFFFF' d='M5.5 7.5l4.5 5 4.5-5z'/%3E%3C/svg%3E\")",
@@ -1282,8 +1799,7 @@ function SoftMenuSelect({
 
       {open && (
         <div
-          className="absolute z-[70] mt-2 w-[220px] rounded-xl overflow-hidden
-                     shadow-xl bg-white/95 backdrop-blur-md border border-emerald-200/40"
+          className="absolute z-[70] mt-2 w-[220px] rounded-xl overflow-hidden shadow-xl bg-white/95 backdrop-blur-md border border-emerald-200/40"
           onMouseLeave={() => setOpen(false)}
         >
           <button
@@ -1404,7 +1920,7 @@ function Field({
   );
 }
 
-/* زر التاريخ — شارة دائرية، بدون حدود بيضاء */
+/* زر التاريخ دائماً مرئي (Gregorian) */
 function SingleDateChip({
   value,
   onChange,
@@ -1416,13 +1932,14 @@ function SingleDateChip({
 }) {
   const ref = React.useRef<HTMLInputElement>(null);
   const open = () => ref.current?.showPicker?.();
+
   const nice = value
-    ? new Date(value + "T00:00:00").toLocaleDateString("ar-SA", {
+    ? new Intl.DateTimeFormat("ar-SA-u-ca-gregory", {
         weekday: "short",
         year: "numeric",
         month: "short",
         day: "numeric",
-      })
+      }).format(new Date(value + "T00:00:00"))
     : "اختر التاريخ";
 
   return (
@@ -1438,9 +1955,7 @@ function SingleDateChip({
       />
       <button
         onClick={open}
-        className="h-9 pl-3 pr-2 rounded-full flex items-center gap-2 shadow-sm transition
-                   bg-[rgba(14,107,67,0.13)] hover:bg-[rgba(14,107,67,0.18)]
-                   text-white focus:outline-none focus:ring-2 focus:ring-emerald-300"
+        className="h-9 pl-3 pr-2 rounded-full flex items-center gap-2 shadow-sm transition bg-[rgba(14,107,67,0.13)] hover:bg-[rgba(14,107,67,0.18)] text-white focus:outline-none focus:ring-2 focus:ring-emerald-300"
         title="التاريخ"
       >
         <span className="w-6 h-6 rounded-full grid place-items-center shadow bg-white/30">
@@ -1453,275 +1968,13 @@ function SingleDateChip({
               e.stopPropagation();
               onClear();
             }}
-            className="ml-1 grid place-items-center w-5 h-5 rounded-full bg-black/10 hover:bg-black/20 text-[12px]"
+            className="ml-1 grid place-items-center و-5 h-5 rounded-full bg-black/10 hover:bg-black/20 text-[12px]"
             title="مسح التاريخ"
           >
             ×
           </span>
         )}
       </button>
-    </div>
-  );
-}
-
-function SearchBar(props: {
-  q: string;
-  setQ: (v: string) => void;
-  setHasSearched: (v: boolean) => void;
-  suggestRef: React.RefObject<HTMLDivElement>;
-  inputRef: React.RefObject<HTMLInputElement>;
-  suggestItems: {
-    label: string;
-    kind: "doctor" | "patient" | "icd" | "text";
-  }[];
-  didYouMean: string;
-  recent: string[];
-  setRecent: (v: string[]) => void;
-  onRunSearch: (override?: string, prettyText?: string) => void;
-  showSuggest: boolean;
-  setShowSuggest: (b: boolean) => void;
-  activeIdx: number;
-  setActiveIdx: (n: number) => void;
-}) {
-  const {
-    q,
-    setQ,
-    setHasSearched,
-    suggestRef,
-    inputRef,
-    suggestItems,
-    didYouMean,
-    recent,
-    setRecent,
-    onRunSearch,
-    showSuggest,
-    setShowSuggest,
-    activeIdx,
-    setActiveIdx,
-  } = props;
-
-  const apply = (s: {
-    label: string;
-    kind: "doctor" | "patient" | "icd" | "text";
-  }) => {
-    const pretty = stripOuterQuotes(s.label);
-    setQ(pretty);
-    setHasSearched(true);
-
-    let override = s.label;
-    if (s.kind === "doctor") override = `d:"${s.label}"`;
-    if (s.kind === "patient") override = `p:"${s.label}"`;
-    if (s.kind === "icd") override = `icd:"${firstIcd(s.label) || s.label}"`;
-
-    requestAnimationFrame(() => inputRef.current?.blur());
-    setShowSuggest(false);
-    onRunSearch(override, pretty);
-  };
-
-  const clearAll = () => {
-    setQ("");
-    setHasSearched(false);
-    window.dispatchEvent(new CustomEvent("med:clearAll"));
-  };
-
-  useEffect(() => {
-    const handler = () => setShowSuggest(false);
-    window.addEventListener("med:cleared", handler);
-    return () => window.removeEventListener("med:cleared", handler);
-  }, [setShowSuggest]);
-
-  return (
-    <div className="mt-4 relative" ref={suggestRef}>
-      <div className="flex items-center gap-2">
-        <div className="relative w-full">
-          <input
-            ref={inputRef}
-            dir="auto"
-            value={stripOuterQuotes(q)}
-            onChange={(e) => {
-              setQ(stripOuterQuotes(e.target.value));
-              setShowSuggest(true);
-              setActiveIdx(0);
-            }}
-            onMouseDown={() => {
-              if (stripOuterQuotes(q)) {
-                setQ("");
-                setHasSearched(false);
-              }
-            }}
-            onFocus={() => {
-              setShowSuggest(true);
-              setActiveIdx(0);
-            }}
-            onKeyDown={(e) => {
-              if (
-                showSuggest &&
-                (e.key === "ArrowDown" ||
-                  e.key === "ArrowUp" ||
-                  e.key === "Tab" ||
-                  e.key === "Enter")
-              ) {
-                if (e.key === "ArrowDown") {
-                  e.preventDefault();
-                  setActiveIdx(
-                    Math.min(activeIdx + 1, suggestItems.length - 1)
-                  );
-                  return;
-                }
-                if (e.key === "ArrowUp") {
-                  e.preventDefault();
-                  setActiveIdx(Math.max(activeIdx - 1, 0));
-                  return;
-                }
-                if (
-                  (e.key === "Enter" || e.key === "Tab") &&
-                  suggestItems[activeIdx]
-                ) {
-                  e.preventDefault();
-                  apply(suggestItems[activeIdx]);
-                  return;
-                }
-              }
-              if (e.key === "Enter") onRunSearch();
-              if (e.key === "Escape") clearAll();
-            }}
-            className="w-full h-10 rounded-2xl pl-10 pr-12 outline-none placeholder:text-black/60 backdrop-blur-md"
-            style={{
-              background: "rgba(255,255,255,0.65)",
-              border: `1px solid ${theme.border}`,
-              boxShadow:
-                "0 2px 14px rgba(14,107,67,0.08), inset 0 1px 1px rgba(0,0,0,0.04)",
-              color: "#111827",
-              direction: "auto",
-              unicodeBidi: "plaintext",
-            }}
-            placeholder="اكتب d: أو p: أو icd: … ثم Enter"
-            aria-label="بحث موحّد"
-          />
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-black/70" />
-          {q && (
-            <button
-              onClick={() => setQ("")}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text:black/50 hover:text-black/80"
-              title="مسح النص"
-            >
-              ×
-            </button>
-          )}
-
-          {showSuggest && (
-            <div
-              className="absolute z-50 mt-2 w-full bg-white border rounded-xl shadow-xl"
-              onMouseDown={(e) => e.preventDefault()}
-            >
-              {didYouMean && (
-                <div className="px-3 py-2 text-[12px] text-[#9A4A07] bg-[#FFF6E3] rounded-t-xl">
-                  هل تقصدين:{" "}
-                  <button
-                    className="underline font-semibold"
-                    onMouseDown={(e) => {
-                      e.preventDefault();
-                      const pretty = stripOuterQuotes(didYouMean);
-                      setQ(pretty);
-                      setShowSuggest(false);
-                      requestAnimationFrame(() => inputRef.current?.blur());
-                      onRunSearch(didYouMean, pretty);
-                    }}
-                  >
-                    {didYouMean}
-                  </button>{" "}
-                  ؟
-                </div>
-              )}
-              <ul className="max-h-[260px] overflow-auto">
-                {suggestItems.length > 0 ? (
-                  suggestItems.map((s, i) => (
-                    <li key={`${s.kind}-${s.label}`}>
-                      <button
-                        className={clsx(
-                          "w-full text-right px-4 py-2 text-[13px] leading-6 hover:bg-emerald-50 flex items-center justify-between",
-                          i === activeIdx && "bg-emerald-50"
-                        )}
-                        style={{ color: theme.ink }}
-                        onMouseEnter={() => setActiveIdx(i)}
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          apply(s);
-                        }}
-                        title={s.label}
-                      >
-                        <span className="truncate">{s.label}</span>
-                        <span className="text-[11px] text-black/60">
-                          {s.kind === "doctor"
-                            ? "doctor"
-                            : s.kind === "patient"
-                            ? "patient"
-                            : s.kind === "icd"
-                            ? "icd"
-                            : "text"}
-                        </span>
-                      </button>
-                    </li>
-                  ))
-                ) : (
-                  <div className="px-4 py-3 text-sm text-neutral-500">
-                    لا توجد اقتراحات
-                  </div>
-                )}
-              </ul>
-              {recent.length > 0 && (
-                <div className="border-t p-2">
-                  <div className="px-2 pb-1 text:[11px] text-black/60 flex items-center gap-1">
-                    <History className="size-3.5" /> عمليات بحث سابقة
-                  </div>
-                  <div className="px-2 pb-2 flex flex-wrap gap-2">
-                    {recent.slice(0, 8).map((r) => (
-                      <button
-                        key={r}
-                        className="h-7 px-2 rounded-full bg:black/5 text-[12px] hover:bg-black/10"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          const pretty = stripOuterQuotes(r);
-                          setQ(pretty);
-                          setShowSuggest(false);
-                          requestAnimationFrame(() => inputRef.current?.blur());
-                          onRunSearch(r, pretty);
-                        }}
-                        title={r}
-                      >
-                        {r}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        <button
-          onClick={() => onRunSearch()}
-          className="h-10 px-4 rounded-xl text-sm font-semibold shadow-md border"
-          style={{
-            background: "#A7F3D0",
-            color: "#0E6B43",
-            borderColor: "transparent",
-          }}
-          title="بحث"
-        >
-          بحث
-        </button>
-        <button
-          onClick={() => {
-            window.dispatchEvent(new CustomEvent("med:clearAll"));
-          }}
-          className="h-10 px-4 rounded-xl text-sm hover:bg-black/5"
-          style={{ color: theme.ink, border: `1px solid ${theme.border}` }}
-          title="مسح الكل"
-        >
-          مسح
-        </button>
-      </div>
     </div>
   );
 }
