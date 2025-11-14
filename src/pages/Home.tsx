@@ -25,7 +25,7 @@ export default function Home() {
       style={{
         background: `
           radial-gradient(circle at 20% 20%, rgba(60, 255, 180, 0.1), transparent 60%),
-          linear-gradient(135deg, #251E56 0%, #2B2D6B 30%, #184C4B 70%, #1F5E53 100%)
+          linear-gradient(135deg, #071737ff 0%, #112a60ff 30%, #184C4B 70%, #1F5E53 100%)
         `,
       }}
     >

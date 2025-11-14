@@ -275,6 +275,45 @@ const csvEscape = (value: string) => {
   const safe = v.replace(/"/g, '""');
   return needsQuotes ? `"${safe}"` : safe;
 };
+/* ===== ربط صفحة السجلات الدوائية بالإشعارات ===== */
+
+type NotiKind = "طبي" | "تأمين" | "دواء";
+type NotiSeverity = "طارئ" | "تنبيه" | "معلومة";
+
+type Noti = {
+  id: string;
+  kind: NotiKind;
+  severity: NotiSeverity;
+  // بقية الحقول غير مهمة للحساب
+};
+
+const RAW_BASE_NOTI = (import.meta as any).env?.VITE_API_BASE || "";
+const API_BASE_NOTI = String(RAW_BASE_NOTI || "");
+const USE_PROXY_NOTI = !API_BASE_NOTI;
+
+const NOTI_LIST_ENDPOINT = USE_PROXY_NOTI
+  ? "/api/notifications"
+  : "/notifications";
+
+const joinUrlNoti = (b: string, p: string) =>
+  b ? `${b.replace(/\/$/, "")}${p.startsWith("/") ? p : `/${p}`}` : p;
+
+// يرجع عدد إشعارات الأدوية
+async function fetchDrugAlertsCount(): Promise<number> {
+  const full = joinUrlNoti(API_BASE_NOTI, NOTI_LIST_ENDPOINT);
+  const url = new URL(full, window.location.origin);
+
+  const r = await fetch(url.toString(), { credentials: "include" });
+  if (!r.ok) throw new Error(await r.text());
+
+  const list = (await r.json()) as Noti[];
+
+  // 🟢 احسبي فقط الإشعارات التي نوعها "دواء"
+  // لو حبيتي الطارئة فقط استخدمي && n.severity === "طارئ"
+  const drugAlerts = list.filter((n) => n.kind === "دواء");
+
+  return drugAlerts.length;
+}
 
 /* ===================== Types ===================== */
 type MedRow = {
@@ -296,6 +335,7 @@ type RecordsResponse = {
   alerts_count: number;
   records: MedRow[];
 };
+type PriorityMode = "none" | "urgent" | "latest";
 
 const EXPORT_COLUMNS: { key: keyof MedRow; label: string }[] = [
   { key: "doctor_name", label: "اسم الطبيب" },
@@ -344,17 +384,27 @@ export default function MedicalRecords() {
   const [loading, setLoading] = useState(true);
   const [firstLoadDone, setFirstLoadDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // عدد التنبيهات الخاصة بالأدوية من نظام الإشعارات
+  const [notifDrugAlerts, setNotifDrugAlerts] = useState(0);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const c = await fetchDrugAlertsCount();
+        setNotifDrugAlerts(c);
+      } catch (e) {
+        console.error("فشل تحميل عدد تنبيهات الأدوية من صفحة الإشعارات", e);
+      }
+    })();
+  }, []);
+
   // شريط البطاقات (مثل التأمين)
   const [showCards, setShowCards] = useState(false);
 
-const cardOptions = [10, 20, 30, 50, 100];
+  const cardOptions = [10, 20, 30, 50, 100];
 
-const [rangeMin, setRangeMin] = useState("");
-const [rangeMax, setRangeMax] = useState("");
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
   const [cardsMenuOpen, setCardsMenuOpen] = useState(false);
-
-  
 
   // data
   const [rows, setRows] = useState<MedRow[]>([]);
@@ -411,7 +461,7 @@ const [rangeMax, setRangeMax] = useState("");
 
   // control bar state (مثل التأمين)
   const [cardLimit, setCardLimit] = useState(24);
-  const [showPriorityOnly, setShowPriorityOnly] = useState(false);
+  const [priorityMode, setPriorityMode] = useState<PriorityMode>("none");
 
   // refs
   const inputRef = useRef<HTMLInputElement>(null);
@@ -421,7 +471,6 @@ const [rangeMax, setRangeMax] = useState("");
     () => dateFrom || dateTo || "",
     [dateFrom, dateTo]
   );
- 
 
   /* expose setters for instant UI update from SearchBar.apply */
   useEffect(() => {
@@ -884,6 +933,45 @@ const [rangeMax, setRangeMax] = useState("");
     }
   }
 
+  const suggestItems = useMemo(() => {
+    const key = normalize(q);
+    const pool: {
+      label: string;
+      kind: "doctor" | "patient" | "icd" | "text";
+    }[] = [];
+    allDoctors.forEach((d) => pool.push({ label: d, kind: "doctor" }));
+    allPatients.forEach((p) => pool.push({ label: p, kind: "patient" }));
+    allIcds.forEach((i) => pool.push({ label: i, kind: "icd" }));
+
+    if (!key) return pool.slice(0, 8);
+
+    const starts = pool.filter((s) => normalize(s.label).startsWith(key));
+    const contains = pool.filter(
+      (s) =>
+        !normalize(s.label).startsWith(key) && normalize(s.label).includes(key)
+    );
+    const out = [...starts.slice(0, 6), ...contains.slice(0, 4)];
+    return out.slice(0, 8);
+  }, [q, allDoctors, allPatients, allIcds]);
+
+  const didYouMean = useMemo(() => {
+    const key = normalize(q);
+    if (!key || key.length < 3) return "";
+    const candidates = [...allDoctors, ...allPatients, ...allIcds];
+    let best = "";
+    let bestDist = Infinity;
+    candidates.forEach((c) => {
+      const d = editDist(normalize(c), key);
+      if (d < bestDist) {
+        best = c;
+        bestDist = d;
+      }
+    });
+    return bestDist > 0 && bestDist <= Math.max(3, Math.floor(key.length * 0.5))
+      ? best
+      : "";
+  }, [q, allDoctors, allPatients, allIcds]);
+
   /* ===================== Search Bar ===================== */
   function SearchBar(props: {
     q: string;
@@ -935,9 +1023,12 @@ const [rangeMax, setRangeMax] = useState("");
       kind: "doctor" | "patient" | "icd" | "text";
     }) => {
       const pretty = s.label.replace(/^"|"$/g, "");
+
+      // تحدّيث حقل البحث
       setQ(pretty);
       setHasSearched(true);
 
+      // تحديث الفلاتر مباشرة من الـ window helpers
       if (s.kind === "doctor") {
         (window as any).setFDoctor?.(pretty);
       }
@@ -948,14 +1039,13 @@ const [rangeMax, setRangeMax] = useState("");
         (window as any).setSelIcd?.(pretty);
       }
 
-      let override = s.label;
-      if (s.kind === "doctor") override = `d:"${s.label}"`;
-      if (s.kind === "patient") override = `p:"${s.label}"`;
-      if (s.kind === "icd") override = `icd:"${s.label}"`;
-
+      // إغلاق قائمة الاقتراحات
       requestAnimationFrame(() => inputRef.current?.blur());
       setShowSuggest(false);
-      onRunSearch(override, pretty);
+
+      // 🟢 مهم: استدعاء runSearch بالنص العادي فقط
+      // لا نستخدم d:"..." ولا p:"..." ولا icd:"..."
+      onRunSearch(pretty, pretty);
     };
 
     useEffect(() => {
@@ -1025,7 +1115,7 @@ const [rangeMax, setRangeMax] = useState("");
                 direction: "auto",
                 unicodeBidi: "plaintext",
               }}
-              placeholder="ابحث باسم طبيب/مريض أو ICD… ثم Enter"
+              placeholder="ابحث عن اسم طبيب/مريض "
               aria-label="بحث موحّد"
             />
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-white/90" />
@@ -1273,15 +1363,23 @@ const [rangeMax, setRangeMax] = useState("");
   // rows الخاصة بالبطاقات (تتأثر بالـ control bar)
   const visibleRows = useMemo(() => {
     let base = rows;
-    if (showPriorityOnly) {
+
+    if (priorityMode === "urgent") {
+      // فقط السجلات العاجلة / التحويل
       base = rows.filter(
         (r) =>
           (r.emer_ind || "").toUpperCase() === "Y" ||
           (r.refer_ind || "").toUpperCase() === "Y"
       );
+    } else if (priorityMode === "latest") {
+      // الأحدث أولاً حسب تاريخ العلاج
+      base = [...rows].sort((a, b) =>
+        (b.treatment_date || "").localeCompare(a.treatment_date || "")
+      );
     }
+
     return base.slice(0, cardLimit);
-  }, [rows, showPriorityOnly, cardLimit]);
+  }, [rows, priorityMode, cardLimit]);
 
   return (
     <div className="min-h-screen" style={{ background: pageBg }}>
@@ -1371,7 +1469,7 @@ const [rangeMax, setRangeMax] = useState("");
               </button>
             </div>
 
-            {/* Always-visible date */}
+            {/* التاريخ دائماً مرئي */}
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <SingleDateChip
                 value={singleDate}
@@ -1387,56 +1485,15 @@ const [rangeMax, setRangeMax] = useState("");
               />
             </div>
 
-            {/* Search */}
+            {/* Search داخل الهيدر */}
             <SearchBar
               q={q}
               setQ={(v) => setQ(stripOuterQuotes(v))}
               setHasSearched={setHasSearched}
               suggestRef={suggestRef}
               inputRef={inputRef}
-              suggestItems={useMemo(() => {
-                const key = normalize(q);
-                const pool: {
-                  label: string;
-                  kind: "doctor" | "patient" | "icd" | "text";
-                }[] = [];
-                allDoctors.forEach((d) =>
-                  pool.push({ label: d, kind: "doctor" })
-                );
-                allPatients.forEach((p) =>
-                  pool.push({ label: p, kind: "patient" })
-                );
-                allIcds.forEach((i) => pool.push({ label: i, kind: "icd" }));
-                if (!key) return pool.slice(0, 8);
-                const starts = pool.filter((s) =>
-                  normalize(s.label).startsWith(key)
-                );
-                const contains = pool.filter(
-                  (s) =>
-                    !normalize(s.label).startsWith(key) &&
-                    normalize(s.label).includes(key)
-                );
-                const out = [...starts.slice(0, 6), ...contains.slice(0, 4)];
-                return out.slice(0, 8);
-              }, [q, allDoctors, allPatients, allIcds])}
-              didYouMean={useMemo(() => {
-                const key = normalize(q);
-                if (!key || key.length < 3) return "";
-                const candidates = [...allDoctors, ...allPatients, ...allIcds];
-                let best = "",
-                  bestDist = Infinity;
-                candidates.forEach((c) => {
-                  const d = editDist(normalize(c), key);
-                  if (d < bestDist) {
-                    best = c;
-                    bestDist = d;
-                  }
-                });
-                return bestDist > 0 &&
-                  bestDist <= Math.max(3, Math.floor(key.length * 0.5))
-                  ? best
-                  : "";
-              }, [q, allDoctors, allPatients, allIcds])}
+              suggestItems={suggestItems}
+              didYouMean={didYouMean}
               recent={recent}
               setRecent={setRecent}
               onRunSearch={(o?: string, p?: string) => runSearch(o, p)}
@@ -1447,66 +1504,64 @@ const [rangeMax, setRangeMax] = useState("");
               setActiveIdx={setActiveIdx}
             />
 
-           {/* Filters (after search) */}
-{hasSearched && (
-  <div className="mt-3 flex flex-wrap items-center gap-2">
-    {(ctxMode === "doctor" ||
-      ctxMode === "icd" ||
-      ctxMode === "patient") && (
-      <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-[rgba(14,107,67,0.12)] backdrop-blur-sm shadow-sm">
-        {/* شارة فلترة */}
-        <span className="inline-flex items-center gap-2 text-[13px] font-medium text-white bg-white/20 px-2.5 py-1 rounded-full">
-          <span className="w-6 h-6 grid place-items-center rounded-lg bg-white/25">
-            <Filter className="size-4 text-white" />
-          </span>
-          فلترة
-        </span>
+            {/* Filters (after search) */}
+            {hasSearched && (
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {(ctxMode === "doctor" ||
+                  ctxMode === "icd" ||
+                  ctxMode === "patient") && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-[rgba(14,107,67,0.12)] backdrop-blur-sm shadow-sm">
+                    {/* شارة فلترة */}
+                    <span className="inline-flex items-center gap-2 text-[13px] font-medium text-white bg-white/20 px-2.5 py-1 rounded-full">
+                      <span className="w-6 h-6 grid place-items-center rounded-lg bg-white/25">
+                        <Filter className="size-4 text-white" />
+                      </span>
+                      فلترة
+                    </span>
 
-        {/* حسب المريض عندما يكون السياق طبيب */}
-        {ctxMode === "doctor" && (
-          <SoftMenuSelect
-            value={fPatient}
-            onChange={(v) => {
-              setFPatient(v);
-              setSelectedName("");
-            }}
-            title="حسب المريض"
-            placeholder="كل المرضى"
-            options={masterPatientsByDoctor[fDoctor] || []}
-          />
-        )}
+                    {/* حسب المريض عندما يكون السياق طبيب */}
+                    {ctxMode === "doctor" && (
+                      <SoftMenuSelect
+                        value={fPatient}
+                        onChange={(v) => {
+                          setFPatient(v);
+                          setSelectedName("");
+                        }}
+                        placeholder="كل المرضى"
+                        options={masterPatientsByDoctor[fDoctor] || []}
+                      />
+                    )}
 
-        {/* حسب الطبيب عندما يكون السياق ICD */}
-        {ctxMode === "icd" && (
-          <SoftMenuSelect
-            value={fDoctor}
-            onChange={(v) => {
-              setFDoctor(v);
-              setSelectedName("");
-            }}
-            title="حسب الطبيب"
-            placeholder="كل الأطباء"
-            options={ctxDoctors}
-          />
-        )}
+                    {/* حسب الطبيب عندما يكون السياق ICD */}
+                    {ctxMode === "icd" && (
+                      <SoftMenuSelect
+                        value={fDoctor}
+                        onChange={(v) => {
+                          setFDoctor(v);
+                          setSelectedName("");
+                        }}
+                        placeholder="كل الأطباء"
+                        options={ctxDoctors}
+                      />
+                    )}
 
-        {/* حسب الطبيب عندما يكون السياق مريض */}
-        {ctxMode === "patient" && (
-          <SoftMenuSelect
-            value={fDoctor}
-            onChange={(v) => {
-              setFDoctor(v);
-              setSelectedName("");
-            }}
-            title="حسب الطبيب"
-            placeholder="كل الأطباء"
-            options={masterDoctorsByPatient[fPatient] || []}
-          />
-        )}
-      </div>
-    )}
-  </div>
-)}
+                    {/* حسب الطبيب عندما يكون السياق مريض */}
+                    {ctxMode === "patient" && (
+                      <SoftMenuSelect
+                        value={fDoctor}
+                        onChange={(v) => {
+                          setFDoctor(v);
+                          setSelectedName("");
+                        }}
+                        placeholder="كل الأطباء"
+                        options={masterDoctorsByPatient[fPatient] || []}
+                      />
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Errors / skeleton */}
           {err && (
@@ -1526,30 +1581,29 @@ const [rangeMax, setRangeMax] = useState("");
           {/* KPI Cards */}
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 relative z-0">
             <KpiCard
-  title="عدد السجلات"
-  value={kpis(kpiRows).total}
-  color="#3B82F6"
-  icon={<ClipboardList />}
-/>
-<KpiCard
-  title="عدد الأطباء"
-  value={kpis(kpiRows).doctors}
-  color="#D97706"
-  icon={<UserPlus />}
-/>
-<KpiCard
-  title="عدد المرضى"
-  value={kpis(kpiRows).patients}
-  color="#E05252"
-  icon={<Users />}
-/>
-<KpiCard
-  title="عدد التنبيهات"
-  value={kpis(kpiRows).alerts}
-  color="#0E9F6E"
-  icon={<Bell />}
-/>
-
+              title="عدد السجلات"
+              value={kpis(kpiRows).total}
+              color="#3B82F6"
+              icon={<ClipboardList />}
+            />
+            <KpiCard
+              title="عدد الأطباء"
+              value={kpis(kpiRows).doctors}
+              color="#D97706"
+              icon={<UserPlus />}
+            />
+            <KpiCard
+              title="عدد المرضى"
+              value={kpis(kpiRows).patients}
+              color="#E05252"
+              icon={<Users />}
+            />
+            <KpiCard
+              title="عدد التنبيهات"
+              value={notifDrugAlerts}
+              color="#0E9F6E"
+              icon={<Bell />}
+            />
           </div>
 
           {/* Priority List (Red) */}
@@ -1757,7 +1811,7 @@ const [rangeMax, setRangeMax] = useState("");
             </div>
           </div>
 
-                    {/* 🔶 شريط التحكم في البطاقات – نفس شكل سجلات الأدوية */}
+          {/* 🔶 شريط التحكم في البطاقات – نفس شكل سجلات الأدوية */}
           <div
             className="mt-4 rounded-3xl border px-4 py-3 bg-[#E6F7EF]"
             style={{ borderColor: "#BFDCD1" }}
@@ -1771,10 +1825,14 @@ const [rangeMax, setRangeMax] = useState("");
                   <button
                     type="button"
                     onClick={() => setPriorityMenuOpen((v) => !v)}
-                    className="inline-flex items-center justify-between min-w-[140px] px-3 h-9 rounded-full bg-white border border-emerald-100 text-[12px] text-neutral-800 shadow-sm"
+                    className="inline-flex items-center justify-between min-w-[160px] px-3 h-9 rounded-full bg-white border border-emerald-100 text-[12px] text-neutral-800 shadow-sm"
                   >
                     <span>
-                      {showPriorityOnly ? "عاجل/تحويل أولاً" : "بدون"}
+                      {priorityMode === "none"
+                        ? "بدون"
+                        : priorityMode === "urgent"
+                        ? "عاجل/تحويل أولاً"
+                        : "الأحدث أولاً"}
                     </span>
                     <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50">
                       <svg
@@ -1800,7 +1858,7 @@ const [rangeMax, setRangeMax] = useState("");
                       <button
                         type="button"
                         onClick={() => {
-                          setShowPriorityOnly(false);
+                          setPriorityMode("none");
                           setPriorityMenuOpen(false);
                         }}
                         className="w-full px-3 py-2 text-right text-[12px] hover:bg-emerald-50"
@@ -1810,33 +1868,25 @@ const [rangeMax, setRangeMax] = useState("");
                       <button
                         type="button"
                         onClick={() => {
-                          setShowPriorityOnly(true);
+                          setPriorityMode("urgent");
                           setPriorityMenuOpen(false);
                         }}
                         className="w-full px-3 py-2 text-right text-[12px] hover:bg-emerald-50"
                       >
                         عاجل/تحويل أولاً
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPriorityMode("latest");
+                          setPriorityMenuOpen(false);
+                        }}
+                        className="w-full px-3 py-2 text-right text-[12px] hover:bg-emerald-50"
+                      >
+                        الأحدث أولاً
+                      </button>
                     </div>
                   )}
-                </div>
-
-                {/* صافي بين من / إلى – شكل واجهة فقط الآن */}
-                <div className="flex items-center gap-2">
-                  <span className="text-neutral-700">صافي بين</span>
-                  <input
-                    value={rangeMin}
-                    onChange={(e) => setRangeMin(e.target.value)}
-                    placeholder="من"
-                    className="h-9 w-28 rounded-full bg-white border border-emerald-100 px-3 text-[12px] outline-none focus:ring-2 focus:ring-emerald-300"
-                  />
-                  <span className="text-neutral-500">-</span>
-                  <input
-                    value={rangeMax}
-                    onChange={(e) => setRangeMax(e.target.value)}
-                    placeholder="إلى"
-                    className="h-9 w-28 rounded-full bg-white border border-emerald-100 px-3 text-[12px] outline-none focus:ring-2 focus:ring-emerald-300"
-                  />
                 </div>
               </div>
 
@@ -1915,12 +1965,12 @@ const [rangeMax, setRangeMax] = useState("");
             {/* نص مساعدة أسفل الشريط */}
             <p className="mt-2 text-[11px] text-emerald-900/70 text-right">
               {showCards
-                ? "البطاقات معروضة. يمكنك تغيير عددها أو أولوية العرض من الشريط أعلاه."
+                ? "البطاقات معروضة. يمكنك تغيير عددها أو طريقة ترتيبها (أولوية / الأحدث) من الشريط أعلاه."
                 : "اضغطي «عرض» لإظهار البطاقات التفصيلية بحسب الفلاتر الحالية."}
             </p>
           </div>
-                    {/* بطاقات السجلات التفصيلية */}
-                              {showCards && (
+          {/* بطاقات السجلات التفصيلية */}
+          {showCards && (
             <div className="mt-6 grid grid-cols-1 gap-4 print:gap-2">
               {firstLoadDone && !loading && rows.length === 0 ? (
                 <div
@@ -2287,8 +2337,7 @@ function Field({
   );
 }
 
-/* زر التاريخ دائماً مرئي (Gregorian) */
-function SingleDateChip({
+/* زر التاريخ دائماً مرئي (Gregorian) */ function SingleDateChip({
   value,
   onChange,
   onClear,
@@ -2299,7 +2348,6 @@ function SingleDateChip({
 }) {
   const ref = React.useRef<HTMLInputElement>(null);
   const open = () => ref.current?.showPicker?.();
-
   const nice = value
     ? new Intl.DateTimeFormat("ar-SA-u-ca-gregory", {
         weekday: "short",
@@ -2308,9 +2356,9 @@ function SingleDateChip({
         day: "numeric",
       }).format(new Date(value + "T00:00:00"))
     : "اختر التاريخ";
-
   return (
     <div className="relative">
+      {" "}
       <input
         ref={ref}
         type="date"
@@ -2319,16 +2367,18 @@ function SingleDateChip({
         className="absolute opacity-0 pointer-events-none"
         tabIndex={-1}
         aria-hidden
-      />
+      />{" "}
       <button
         onClick={open}
         className="h-9 pl-3 pr-2 rounded-full flex items-center gap-2 shadow-sm transition bg-[rgba(14,107,67,0.13)] hover:bg-[rgba(14,107,67,0.18)] text-white focus:outline-none focus:ring-2 focus:ring-emerald-300"
         title="التاريخ"
       >
+        {" "}
         <span className="w-6 h-6 rounded-full grid place-items-center shadow bg-white/30">
-          <CalendarDays className="size-4 text-white" />
-        </span>
-        <span className="text-sm">{nice}</span>
+          {" "}
+          <CalendarDays className="size-4 text-white" />{" "}
+        </span>{" "}
+        <span className="text-sm">{nice}</span>{" "}
         {value && (
           <span
             onClick={(e) => {
@@ -2338,10 +2388,11 @@ function SingleDateChip({
             className="ml-1 grid place-items-center w-5 h-5 rounded-full bg-black/10 hover:bg-black/20 text-[12px]"
             title="مسح التاريخ"
           >
-            ×
+            {" "}
+            ×{" "}
           </span>
-        )}
-      </button>
+        )}{" "}
+      </button>{" "}
     </div>
   );
 }

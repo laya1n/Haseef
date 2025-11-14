@@ -412,57 +412,6 @@ export default function Notifications() {
               />
             </div>
 
-            {/* Search bar بسيط لكن بنفس الشكل */}
-            <div className="mt-4 flex items-center gap-2">
-              <div className="relative w-full">
-                <input
-                  ref={inputRef}
-                  dir="auto"
-                  value={q}
-                  onChange={(e) => setQ(stripOuterQuotes(e.target.value))}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      setSelectedLabel("");
-                    }
-                    if (e.key === "Escape") setQ("");
-                  }}
-                  className="w-full h-11 rounded-xl pl-10 pr-12 outline-none placeholder:text-emerald-100 text-white transition focus:ring-2 focus:ring-emerald-300"
-                  style={{
-                    background: "rgba(255,255,255,0.12)",
-                    border: "1px solid rgba(255,255,255,0.25)",
-                    boxShadow: "inset 0 1px 3px rgba(0,0,0,0.15)",
-                    backdropFilter: "blur(6px)",
-                    direction: "auto",
-                    unicodeBidi: "plaintext",
-                  }}
-                  placeholder="ابحث في العناوين أو تفاصيل الإشعارات"
-                />
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-white/90" />
-                {q && (
-                  <button
-                    onClick={() => setQ("")}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-white/80 hover:text-white"
-                    title="مسح النص"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-
-              <button
-                onClick={() => {
-                  setQ("");
-                  setFilterKind("الكل");
-                  setFilterSev("الكل");
-                  setSelectedLabel("");
-                }}
-                className="h-11 px-4 rounded-xl text-sm border text-white hover:bg-white/10"
-                style={{ borderColor: "rgba(255,255,255,0.28)" }}
-              >
-                عرض الكل
-              </button>
-            </div>
-
             {/* فلاتر صغيرة نوع + أهمية */}
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <NiceSelect

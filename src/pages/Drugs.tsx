@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import { apiGetDrugs, apiLogout } from "@/lib/api";
+import SmartDrugChat from "@/components/SmartDrugChat";
 
 /* ====== AG Grid (مطابق للDashboard) ====== */
 import { AgGridReact } from "ag-grid-react";
@@ -295,6 +296,9 @@ export default function Drugs() {
     setViewRow(r);
     setShowViewer(true);
   };
+
+  // مثال: مع باقي الـ useState الموجودة عندك
+  const [viewerRow, setViewerRow] = useState<DrugRow | null>(null);
 
   const closeViewer = () => {
     setShowViewer(false);
@@ -634,6 +638,16 @@ export default function Drugs() {
     }
     return out;
   }, [rows, selDoctor, qKey]);
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { query: string };
+      // هنا شبكي الـ query مع منطق البحث الموجود عندك في السجلات الدوائية
+      // مثلاً: setQuickQuery(detail.query); أو استدعاء fetch ببارامترات معينة
+    };
+
+    window.addEventListener("drug:runQuick", handler);
+    return () => window.removeEventListener("drug:runQuick", handler);
+  }, []);
 
   /* ---------- توزيع الدونات (حسب الدواء) ---------- */
   const donut = useMemo<DonutSlice[]>(() => {
@@ -1123,6 +1137,9 @@ export default function Drugs() {
                   />
                 </div>
               </div>
+              {/* دردشة ذكية */}
+              <SmartDrugChat side="right" themeColor="#0E6B43" />
+
               {/* شريط البطاقات (مثل التأميني) */}
               <div
                 className="mt-4 rounded-2xl p-4 shadow-soft flex flex-wrap items-center gap-3 border"
@@ -1277,18 +1294,20 @@ export default function Drugs() {
                     </div>
                   ) : (
                     cardRows.map((r, i) => (
+                      // عند الضغط على البطاقة سيتم فتح الـ Viewer
                       <DrugCard
                         key={r.id ?? `${r.service_code}-${i}`}
                         row={r}
+                        onOpen={() => setViewerRow(r)}
                       />
                     ))
                   )}
                 </div>
               )}
-
-              {/* جدول / بطاقات أو أي عرض آخر (ابقِ كودك الحالي أو الغريد) */}
-              {/* ... هنا تكملين عرض gridRows بالـ AG Grid أو البطاقات كما تحبين ... */}
             </>
+          )}
+          {viewerRow && (
+            <DrugViewer row={viewerRow} onClose={() => setViewerRow(null)} />
           )}
         </main>
       </div>
@@ -1931,10 +1950,12 @@ function SearchBar(props: {
     </div>
   );
 }
-function DrugCard({ row }: { row: DrugRow }) {
+function DrugCard({ row, onOpen }: { row: DrugRow; onOpen?: () => void }) {
   return (
+    // عند الضغط على الكرت يتم فتح الـ Viewer
     <div
-      className="shadow-sm print:shadow-none print:p-3 transition-transform duration-150 hover:-translate-y-[2px] hover:shadow-lg relative overflow-hidden p-4"
+      onClick={onOpen}
+      className="shadow-sm print:shadow-none print:p-3 transition-transform duration-150 hover:-translate-y-[2px] hover:shadow-lg relative overflow-hidden p-4 cursor-pointer"
       style={{
         background: "#F6FBF8",
         border: "1px solid #D7E7DF",
@@ -1987,7 +2008,7 @@ function DrugViewer({ row, onClose }: { row: DrugRow; onClose: () => void }) {
   const badge = (txt: string, color: string) => (
     <span
       className="px-3 py-1 text-xs rounded-full font-semibold"
-      style={{ background: `${color}22`, color }}
+      style={{ background: `${color}15`, color }}
     >
       {txt}
     </span>
@@ -1995,54 +2016,53 @@ function DrugViewer({ row, onClose }: { row: DrugRow; onClose: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-[1px]"
+      className="fixed inset-0 z-[80] bg-black/40 backdrop-blur-[1px] flex items-start justify-center overflow-y-auto"
       onClick={onClose}
       dir="rtl"
     >
+      {/* الكرت الرئيسي */}
       <div
-        className="absolute top-0 bottom-0 right-0 w-full max-w-[720px] bg-white shadow-2xl overflow-y-auto"
+        className="relative w-full max-w-5xl mx-auto mt-10 mb-10 bg-[#F5FBF8] border border-emerald-50 rounded-3xl shadow-2xl"
         onClick={(e) => e.stopPropagation()}
-        style={{ borderTopLeftRadius: 24, borderBottomLeftRadius: 24 }}
-        aria-modal="true"
-        role="dialog"
       >
-        {/* Header */}
-        <div
-          className="px-6 py-5 flex items-center justify-between"
-          style={{
-            background:
-              "linear-gradient(135deg, #0E6B43 0%, #1B5A45 60%, #2C7A63 100%)",
-            color: "white",
-            borderTopLeftRadius: 24,
-          }}
+        {/* زر الإغلاق */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 left-4 h-9 w-9 rounded-full bg-white/90 border border-emerald-100 shadow-sm grid place-items-center hover:bg-emerald-50"
         >
-          <div className="text-lg md:text-xl font-semibold">
-            تفاصيل صرف الدواء
+          <X className="size-5 text-emerald-700" />
+        </button>
+
+        {/* الهيدر */}
+        <div className="px-8 pt-7 pb-4 border-b border-emerald-50">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-center md:text-right">
+              <div className="text-sm text-emerald-800/80 font-medium mb-1">
+                تفاصيل صرف الدواء
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {row.service_code &&
+                badge(`الكود: ${row.service_code}`, "#0D16D1")}
+              {row.quantity != null &&
+                badge(`الكمية: ${nfmt(row.quantity)}`, "#2563EB")}
+              {row.date && badge(row.date, "#065F46")}
+            </div>
           </div>
-          <button
-            onClick={onClose}
-            className="h-9 w-9 rounded-full bg-white/15 hover:bg-white/25 grid place-items-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
-            title="إغلاق"
-            aria-label="إغلاق"
-          >
-            <X className="size-5 text-white" />
-          </button>
         </div>
 
-        {/* Content */}
-        <div className="p-6 space-y-5">
-          <div className="flex flex-wrap items-center gap-2">
-            {row.service_code && badge(`الكود: ${row.service_code}`, "#0D16D1")}
-            {row.quantity != null &&
-              badge(`الكمية: ${nfmt(row.quantity)}`, "#2563EB")}
-            {row.date && badge(`${row.date}`, "#065F46")}
+        {/* المحتوى – نفس إحساس التأميني */}
+        <div className="px-8 py-7 space-y-5">
+          {/* صف 1: المريض / الطبيب */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ViewerField label="اسم المريض" value={row.patient_name} />
+            <ViewerField label="اسم الطبيب" value={row.doctor_name} />
           </div>
 
+          {/* صف 2: التاريخ / الوصف */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Field label="اسم الطبيب" value={row.doctor_name} />
-            <Field label="اسم المريض" value={row.patient_name} />
-
-            <Field
+            <ViewerField
               label="التاريخ"
               value={
                 <div className="flex items-center gap-2">
@@ -2055,24 +2075,84 @@ function DrugViewer({ row, onClose }: { row: DrugRow; onClose: () => void }) {
               }
             />
 
-            <Field
+            <ViewerField
               label="وصف الخدمة/الدواء"
               value={row.service_description}
               full
               multiline
             />
+          </div>
 
-            <Field label="سعر الوحدة" value={nfmt(row.item_unit_price)} />
-            <Field label="الإجمالي" value={nfmt(row.gross_amount)} />
-            <Field label="الضريبة" value={nfmt(row.vat_amount)} />
-            <Field label="الخصم" value={nfmt(row.discount)} />
-            <Field label="الصافي" value={nfmt(row.net_amount)} />
+          {/* صف 3: أسعار أساسية */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <ViewerField label="سعر الوحدة" value={nfmt(row.item_unit_price)} />
+            <ViewerField label="الإجمالي" value={nfmt(row.gross_amount)} />
+            <ViewerField label="الصافي" value={nfmt(row.net_amount)} />
+          </div>
 
-            {row.ai_analysis && (
-              <Field label="تحليل AI" value={row.ai_analysis} full multiline />
-            )}
+          {/* صف 4: ضريبة + خصم */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <ViewerField label="الضريبة" value={nfmt(row.vat_amount)} />
+            <ViewerField label="الخصم" value={nfmt(row.discount)} />
+          </div>
+
+          {/* ✅ خانة تحليل AI (الكرت الأخضر في الصورة) */}
+          <div className="mt-4 rounded-[22px] bg-[#EAF9F1] border border-emerald-100 px-6 py-4 flex flex-col gap-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-emerald-900">
+                  تحليل AI
+                </span>
+                <span className="px-3 py-0.5 text-[11px] rounded-full bg-emerald-100 text-emerald-800 font-medium">
+                  تجريبي
+                </span>
+              </div>
+
+              <div className="w-8 h-8 rounded-full bg-emerald-200/60 grid place-items-center">
+                <Bot className="size-4 text-emerald-800" />
+              </div>
+            </div>
+
+            <p className="text-[13px] text-emerald-900/80 leading-relaxed">
+              {row.ai_analysis && row.ai_analysis.trim().length > 0
+                ? row.ai_analysis
+                : "No analysis yet — will be added by AI Agent."}
+            </p>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+/* حقول عريضة ناعمة مثل التأميني */
+function ViewerField({
+  label,
+  value,
+  full,
+  multiline,
+}: {
+  label: string;
+  value: React.ReactNode;
+  full?: boolean;
+  multiline?: boolean;
+}) {
+  return (
+    <div className={full ? "md:col-span-2" : ""}>
+      <div className="text-[12px] text-emerald-900/70 mb-1 pr-2">{label}</div>
+      <div
+        className={clsx(
+          "w-full rounded-[999px] border px-5 py-3 text-sm flex items-center",
+          multiline && "whitespace-pre-wrap leading-7"
+        )}
+        style={{
+          background: "#F5FFFA",
+          borderColor: "#D6EDE1",
+          minHeight: multiline ? 56 : 48,
+        }}
+        title={typeof value === "string" ? value : undefined}
+      >
+        <span className="truncate">{value || "—"}</span>
       </div>
     </div>
   );

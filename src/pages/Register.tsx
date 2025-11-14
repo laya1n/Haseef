@@ -1,7 +1,15 @@
 // src/pages/Register.tsx
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { UserRound, Contact, Mail, Lock, Eye, EyeOff, Check } from "lucide-react";
+import {
+  UserRound,
+  Contact,
+  Mail,
+  Lock,
+  Eye,
+  EyeOff,
+  Check,
+} from "lucide-react";
 
 /* ============================== Types ============================== */
 type NewUser = {
@@ -115,7 +123,7 @@ export default function Register() {
       style={{
         background: `
           radial-gradient(circle at 20% 20%, rgba(146, 227, 169, 0.10), transparent 60%),
-          linear-gradient(135deg, #251E56 0%, #2B2D6B 30%, #184C4B 70%, #1F5E53 100%)
+          linear-gradient(135deg,  #071737ff 0%, #112a60ff 30%, #184C4B 70%, #1F5E53 100%)
         `,
       }}
     >
