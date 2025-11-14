@@ -854,7 +854,6 @@ export default function MedicalRecords() {
     setDateTo("");
     setHasSearched(false);
     setSelectedName("");
-    setShowPriorityOnly(false);
     setCardLimit(24);
     fetchData({
       keepLoading: true,
@@ -1477,9 +1476,18 @@ export default function MedicalRecords() {
               <div className="flex items-center gap-3">
                 <SingleDateChip
                   value={selDate}
-                  onChange={(v) => setSelDate(v)}
-                  onClear={() => setSelDate("")}
+                  onChange={(v) => {
+                    setSelDate(v);
+                    setDateFrom(v);
+                    setDateTo("");
+                  }}
+                  onClear={() => {
+                    setSelDate("");
+                    setDateFrom("");
+                    setDateTo("");
+                  }}
                 />
+
                 {/* أي فلاتر أخرى لو عندك */}
               </div>
             </div>
@@ -1521,6 +1529,7 @@ export default function MedicalRecords() {
                     {/* حسب المريض عندما يكون السياق طبيب */}
                     {ctxMode === "doctor" && (
                       <SoftMenuSelect
+                        title="المريض"
                         value={fPatient}
                         onChange={(v) => {
                           setFPatient(v);
@@ -1534,6 +1543,7 @@ export default function MedicalRecords() {
                     {/* حسب الطبيب عندما يكون السياق ICD */}
                     {ctxMode === "icd" && (
                       <SoftMenuSelect
+                        title="الطبيب"
                         value={fDoctor}
                         onChange={(v) => {
                           setFDoctor(v);
@@ -1547,6 +1557,7 @@ export default function MedicalRecords() {
                     {/* حسب الطبيب عندما يكون السياق مريض */}
                     {ctxMode === "patient" && (
                       <SoftMenuSelect
+                        title="الطبيب"
                         value={fDoctor}
                         onChange={(v) => {
                           setFDoctor(v);

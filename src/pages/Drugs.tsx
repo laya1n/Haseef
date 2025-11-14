@@ -3,15 +3,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import logo from "@/assets/logo2.png";
 import {
-  Plus,
   Shield,
   Pill,
   BellRing,
-  MessageSquareCode,
   LogOut,
   Search,
-  Loader2,
-  TriangleAlert,
   Home,
   Bot,
   Eye,
@@ -21,7 +17,6 @@ import {
   Users,
   Bell,
   History,
-  Filter,
   ChevronDown,
 } from "lucide-react";
 import clsx from "clsx";
@@ -248,7 +243,6 @@ export default function Drugs() {
       }
     })();
   }, []);
-  const totalDrugAlerts = alertsCount + notifDrugAlerts;
 
   const [aiMsg, setAiMsg] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
@@ -381,29 +375,6 @@ export default function Drugs() {
     };
     document.addEventListener("mousedown", onDoc);
     return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
-
-  // بعد useEffect حق تحميل سجلات الأدوية مثلاً
-  useEffect(() => {
-    (async () => {
-      try {
-        const list = await fetchNotificationsForDrugs();
-
-        // عدد إشعارات الأدوية فقط
-        const count = list.filter(
-          (n) => n.kind === "دواء" // نوع السجل دوائي
-          // لو تبغي فقط غير المقروءة:
-          // && !n.read
-          // أو فقط الطارئة والتنبيهات بدون "معلومة":
-          // && n.severity !== "معلومة"
-        ).length;
-
-        setAlertsCount(count);
-      } catch (e) {
-        console.error("فشل تحميل إشعارات الأدوية:", e);
-        // ممكن تتركين alertsCount كما هو (0) لو صار خطأ
-      }
-    })();
   }, []);
 
   // Debounce للبحث النصي
