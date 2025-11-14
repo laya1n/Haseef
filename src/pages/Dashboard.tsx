@@ -406,6 +406,8 @@ export default function MedicalRecords() {
   const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
   const [cardsMenuOpen, setCardsMenuOpen] = useState(false);
 
+  const [selDate, setSelDate] = useState(""); // تاريخ واحد مبدئياً فاضي
+
   // data
   const [rows, setRows] = useState<MedRow[]>([]);
   const [chartRows, setChartRows] = useState<MedRow[]>([]);
@@ -1470,19 +1472,16 @@ export default function MedicalRecords() {
             </div>
 
             {/* التاريخ دائماً مرئي */}
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <SingleDateChip
-                value={singleDate}
-                onChange={(d) => {
-                  setHasSearched(true);
-                  setDateFrom(d);
-                  setDateTo("");
-                }}
-                onClear={() => {
-                  setDateFrom("");
-                  setDateTo("");
-                }}
-              />
+            <div className="mt-4 flex items-center justify-between gap-3">
+              {/* يسار/يمين حسب RTL: جزء التاريخ والفلاتر */}
+              <div className="flex items-center gap-3">
+                <SingleDateChip
+                  value={selDate}
+                  onChange={(v) => setSelDate(v)}
+                  onClear={() => setSelDate("")}
+                />
+                {/* أي فلاتر أخرى لو عندك */}
+              </div>
             </div>
 
             {/* Search داخل الهيدر */}
@@ -1581,7 +1580,7 @@ export default function MedicalRecords() {
           {/* KPI Cards */}
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 relative z-0">
             <KpiCard
-              title="عدد السجلات"
+              title="عدد الزيارات"
               value={kpis(kpiRows).total}
               color="#3B82F6"
               icon={<ClipboardList />}
@@ -1961,13 +1960,6 @@ export default function MedicalRecords() {
                 )}
               </div>
             </div>
-
-            {/* نص مساعدة أسفل الشريط */}
-            <p className="mt-2 text-[11px] text-emerald-900/70 text-right">
-              {showCards
-                ? "البطاقات معروضة. يمكنك تغيير عددها أو طريقة ترتيبها (أولوية / الأحدث) من الشريط أعلاه."
-                : "اضغطي «عرض» لإظهار البطاقات التفصيلية بحسب الفلاتر الحالية."}
-            </p>
           </div>
           {/* بطاقات السجلات التفصيلية */}
           {showCards && (
@@ -1997,6 +1989,8 @@ export default function MedicalRecords() {
               )}
             </div>
           )}
+          {/* مكوّن المساعد الطبي */}
+          <SmartChat side="right" themeColor="#0E6B43" />
         </main>
       </div>
     </div>
@@ -2337,7 +2331,8 @@ function Field({
   );
 }
 
-/* زر التاريخ دائماً مرئي (Gregorian) */ function SingleDateChip({
+/* زر التاريخ دائماً مرئي (Gregorian) */
+function SingleDateChip({
   value,
   onChange,
   onClear,

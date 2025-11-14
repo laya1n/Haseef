@@ -331,26 +331,35 @@ export default function Drugs() {
     return "none";
   }, [selDoctor, selDrug]);
 
+  const sameNorm = (a?: string, b?: string) => {
+    const na = normalize(a || "");
+    const nb = normalize(b || "");
+    if (!na || !nb) return false;
+    return na === nb || na.includes(nb) || nb.includes(na);
+  };
+
   // الخيارات داخل الليستة حسب الوضع
   const linkFilterOptions = useMemo(() => {
     if (linkFilterMode === "drugByDoctor") {
       const set = new Set<string>();
       rows.forEach((r) => {
-        if (normalize(r.doctor_name) === normalize(selDoctor)) {
-          if (r.service_description) set.add(r.service_description);
+        if (sameNorm(r.doctor_name, selDoctor) && r.service_description) {
+          set.add(r.service_description);
         }
       });
       return Array.from(set).sort();
     }
+
     if (linkFilterMode === "doctorByDrug") {
       const set = new Set<string>();
       rows.forEach((r) => {
-        if (normalize(r.service_description) === normalize(selDrug)) {
-          if (r.doctor_name) set.add(r.doctor_name);
+        if (sameNorm(r.service_description, selDrug) && r.doctor_name) {
+          set.add(r.doctor_name);
         }
       });
       return Array.from(set).sort();
     }
+
     return [];
   }, [linkFilterMode, rows, selDoctor, selDrug]);
 
@@ -494,7 +503,6 @@ export default function Drugs() {
 
     return [...starts.slice(0, 6), ...contains.slice(0, 4)];
   }, [q, doctors, drugs, patients, codes]);
-  // نفس منطق زر "بحث" ويمكننا استدعاؤه من الزر أو من الاقتراحات
   const handleRunSearch = (text?: string) => {
     setShowSuggest(false);
 
@@ -503,6 +511,11 @@ export default function Drugs() {
 
     const pretty = raw;
     const key = normalize(raw);
+
+    // 🔹 لو جاني نص من الاقتراحات/الهيستوري، حدّث مربع البحث به
+    if (text) {
+      setQ(pretty);
+    }
 
     // نحاول نطابق دكتور / دواء
     let matchDoctor = doctors.find((d) => normalize(d) === key) || null;
@@ -517,11 +530,9 @@ export default function Drugs() {
     }
 
     if (matchDoctor && !matchDrug) {
-      // بحث باسم طبيب
       setSelDoctor(matchDoctor);
       setSelDrug("الكل");
     } else if (matchDrug && !matchDoctor) {
-      // بحث باسم دواء
       setSelDrug(matchDrug);
       setSelDoctor("الكل");
     } else {
@@ -546,14 +557,25 @@ export default function Drugs() {
   /* ---------- تصفية الجدول (تشمل كل الفلاتر) ---------- */
   const filtered = useMemo(() => {
     let out = rows;
+
     if (selDoctor !== "الكل")
       out = out.filter(
         (r) => normalize(r.doctor_name) === normalize(selDoctor)
       );
+
     if (selDrug !== "الكل")
       out = out.filter(
         (r) => normalize(r.service_description) === normalize(selDrug)
       );
+
+    // 🔹 فلتر الرابط الإضافي
+    if (linkFilterMode === "drugByDoctor" && linkFilterValue) {
+      out = out.filter((r) => sameNorm(r.service_description, linkFilterValue));
+    }
+    if (linkFilterMode === "doctorByDrug" && linkFilterValue) {
+      out = out.filter((r) => sameNorm(r.doctor_name, linkFilterValue));
+    }
+
     if (qKey) {
       out = out.filter((r) =>
         [
@@ -575,7 +597,8 @@ export default function Drugs() {
       );
     }
     return out;
-  }, [rows, selDoctor, selDrug, qKey]);
+  }, [rows, selDoctor, selDrug, qKey, linkFilterMode, linkFilterValue]);
+
   /* ---------- بيانات البطاقات (لواجهة الكروت) ---------- */
   const cardRows = useMemo(() => {
     let out = filtered;
@@ -966,13 +989,14 @@ export default function Drugs() {
             <div className="mt-4 flex items-center justify-start">
               <button
                 onClick={() => setShowDatePicker(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-full text-sm font-semibold 
-               bg-white/20 text-white border border-white/30 shadow-sm 
-               hover:bg-white/30 transition"
+                className="inline-flex items-center gap-2 px-4 h-10 rounded-full
+             
+             text-xs md:text-sm font-semibold text-white
+             shadow-sm hover:bg-white/15 "
                 title="اختيار التاريخ"
               >
-                اختر التاريخ
                 <CalendarDays className="size-4 text-white" />
+                <span>اختر التاريخ</span>
               </button>
 
               {showDatePicker && (
@@ -1044,13 +1068,47 @@ export default function Drugs() {
                     </span>
                   </button>
 
-                  {/* الليستة نفسها تبقى كما هي تحتها */}
                   {linkFilterOpen && (
-                    <div
-                      className="absolute right-0 mt-2 w-full max-w-xs rounded-xl bg-white shadow-2xl border border-emerald-100 z-[90] overflow-hidden"
-                      style={{ maxHeight: 260 }}
-                    >
-                      {/* ... نفس كود <ul> والـ options اللي عندك الآن ... */}
+                    <div className="absolute right-0 mt-2 w-64 bg-white border border-emerald-100 rounded-xl shadow-lg py-2 z-50">
+                      {linkFilterOptions.length > 0 ? (
+                        <>
+                          {/* خيار عرض الكل – يرجّع الفلتر الرابط فقط */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLinkFilterValue("");
+                              setLinkFilterOpen(false);
+                            }}
+                            className="w-full text-right px-4 py-2 text-[13px] leading-6 
+                                       hover:bg-emerald-50 text-black font-semibold"
+                          >
+                            عرض الكل
+                          </button>
+
+                          {/* خط فاصل بسيط */}
+                          <div className="h-px bg-emerald-100 my-1" />
+
+                          {/* باقي الخيارات */}
+                          {linkFilterOptions.map((opt) => (
+                            <button
+                              key={opt}
+                              type="button"
+                              onClick={() => {
+                                setLinkFilterValue(opt);
+                                setLinkFilterOpen(false);
+                              }}
+                              className="w-full text-right px-4 py-2 text-[13px] leading-6 
+                                         hover:bg-emerald-50 text-black"
+                            >
+                              {opt}
+                            </button>
+                          ))}
+                        </>
+                      ) : (
+                        <div className="px-4 py-3 text-sm text-neutral-500 text-center">
+                          لا توجد عناصر مطابقة.
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

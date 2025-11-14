@@ -52,8 +52,8 @@ export default function Home() {
       {/* العنوان الرئيسي */}
       <div className="max-w-3xl mb-10 mt-10">
         <h1 className="text-3xl md:text-4xl font-bold leading-snug text-white drop-shadow-md">
-          مرحباً بك في نظام <span className="text-[#92E3A9]">حصيف الذكي</span>{" "}
-          لتحليل الأنماط الصحية
+          مرحباً بك في نظام <span className="text-[#92E3A9]">حصيف</span> لتحليل
+          الأنماط الصحية
         </h1>
         <p className="mt-3 text-white/80 text-sm md:text-base">
           منصة تحليل الأنماط الصحية لمتابعة جودة الخدمات الطبية والتأمينية وصرف
