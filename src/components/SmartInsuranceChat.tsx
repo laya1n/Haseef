@@ -1,4 +1,4 @@
-// src/components/SmartChat.tsx
+// src/components/SmartInsuranceChat.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Bot, Send, Paperclip, X, Maximize2, Minimize2 } from "lucide-react";
 import clsx from "clsx";
@@ -10,20 +10,20 @@ type ChatMsg = {
   files?: File[];
 };
 
-type SmartChatProps = {
+type SmartInsuranceChatProps = {
   side?: "right" | "left"; // مكان زر الفتح
   themeColor?: string; // لون التمييز (أخضر حصيف)
-  context?: string; // سياق اختياري
+  context?: string; // سياق اختياري (لو احتجتيه لاحقاً)
 };
 
-const SmartChat: React.FC<SmartChatProps> = ({
+const SmartInsuranceChat: React.FC<SmartInsuranceChatProps> = ({
   side = "right",
   themeColor = "#0E6B43",
 }) => {
   const [open, setOpen] = useState(false);
   const [isFull, setIsFull] = useState(false);
   const [msgs, setMsgs] = useState<ChatMsg[]>([
-    { id: "m1", role: "assistant", text: "كيف أساعدك في السجلات الطبية؟" },
+    { id: "m1", role: "assistant", text: "كيف أساعدك في السجلات التأمينية؟" },
   ]);
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
@@ -42,19 +42,28 @@ const SmartChat: React.FC<SmartChatProps> = ({
     return { from: fmt(start), to: fmt(end), today: fmt(new Date()) };
   }, []);
 
-  // ✅ 5 أسئلة جاهزة فقط
+  // ✅ أسئلة جاهزة للسجلات التأمينية
   const QUICK_ITEMS: { label: string; query: string }[] = [
     {
-      label: "أكثر الأطباء تسجيلاً هذا الشهر",
-      query: `from:${monthBounds.from} to:${monthBounds.to}`,
+      label: "إجمالي صافي المطالبات هذا الشهر",
+      query: `from:${monthBounds.from} to:${monthBounds.to} metric:net_sum`,
     },
     {
-      label: "السجلات العاجلة هذا الشهر",
-      query: `emer:Y from:${monthBounds.from} to:${monthBounds.to}`,
+      label: "المطالبات المرفوضة",
+      query: `status:rejected`,
     },
-    { label: "السجلات المحوّلة", query: `ref:Y` },
-    { label: "حالات السكري (E11)", query: `icd:E11` },
-    { label: "سجلات اليوم", query: `on:${monthBounds.today}` },
+    {
+      label: "المطالبات العاجلة (طوارئ)",
+      query: `emer:Y`,
+    },
+    {
+      label: "المطالبات المحوّلة",
+      query: `ref:Y`,
+    },
+    {
+      label: "مطالبات اليوم",
+      query: `on:${monthBounds.today}`,
+    },
   ];
 
   useEffect(() => {
@@ -84,11 +93,26 @@ const SmartChat: React.FC<SmartChatProps> = ({
     if (fileRef.current) fileRef.current.value = "";
   };
 
-  // عند اختيار سؤال جاهز
+  // عند اختيار سؤال جاهز: أظهر النص الجميل في الدردشة وشغّل البحث باستعلام خام
   const applyQuick = (item: { label: string; query: string }) => {
+    // رسالة المستخدم بالعبارة العربية
     setMsgs((m) => [
       ...m,
       { id: String(Date.now()), role: "user", text: item.label },
+    ]);
+
+    // إشعار صفحة السجلات التأمينية لتشغيل البحث
+    try {
+      window.dispatchEvent(
+        new CustomEvent("ins:runQuick", { detail: { query: item.query } })
+      );
+    } catch {
+      // لا شيء
+    }
+
+    // رد مختصر اختياري
+    setMsgs((m) => [
+      ...m,
       {
         id: String(Date.now() + 1),
         role: "assistant",
@@ -96,14 +120,7 @@ const SmartChat: React.FC<SmartChatProps> = ({
       },
     ]);
 
-    try {
-      window.dispatchEvent(
-        new CustomEvent("med:runQuick", { detail: { query: item.query } })
-      );
-    } catch {
-      // ignore
-    }
-
+    // تفريغ الإدخال
     setText("");
     setFiles([]);
     if (fileRef.current) fileRef.current.value = "";
@@ -111,24 +128,21 @@ const SmartChat: React.FC<SmartChatProps> = ({
 
   return (
     <>
-      {/* زر الفتح (مطابق للصورة + مرفوع قليلاً) */}
+      {/* زر الفتح */}
       <button
         onClick={() => setOpen(true)}
         className={clsx(
-          "fixed z-[80] rounded-full shadow-xl px-5 h-12 flex items-center gap-2 text-white transition-transform hover:scale-105",
-          side === "right" ? "bottom-36 right-6" : "bottom-36 left-6" // ⬆️ تم رفعه
+          "fixed z-[80] rounded-full shadow-xl px-4 h-12 flex items-center gap-2 text-white transition-transform hover:scale-105",
+          side === "right" ? "bottom-28 right-6" : "bottom-28 left-6"
         )}
         style={{
           background:
             "linear-gradient(135deg, #0D16D1 0%, #2341ff 60%, #5f7bff 120%)",
-          boxShadow: "0 16px 30px rgba(37, 99, 235, 0.45)",
         }}
-        aria-label="المساعد الذكي"
+        aria-label="المساعد التأميني"
       >
-        <span className="font-semibold text-sm">المساعد الذكي</span>
-        <span className="w-7 h-7 rounded-xl bg-white/20 grid place-items-center">
-          <Bot className="size-4" />
-        </span>
+        <Bot className="size-5" />
+        <span className="font-semibold hidden sm:inline">المساعد التأميني</span>
       </button>
 
       {/* نافذة الشات */}
@@ -143,9 +157,9 @@ const SmartChat: React.FC<SmartChatProps> = ({
           style={{
             width: isFull ? "100vw" : "min(500px, 94vw)",
             height: isFull ? "100vh" : "72vh",
-            background: "rgba(255,255,255,0.95)",
+            background: "rgba(255,255,255,0.85)",
             border: `2px solid ${themeColor}`,
-            boxShadow: "0 10px 25px rgba(0,0,0,0.08)",
+            boxShadow: "0 10px 25px rgba(0,0,0,0.05)",
             display: "flex",
             flexDirection: "column",
           }}
@@ -164,7 +178,9 @@ const SmartChat: React.FC<SmartChatProps> = ({
               >
                 <Bot className="size-5" />
               </span>
-              <div className="font-semibold text-gray-800">المساعد الذكي</div>
+              <div className="font-semibold text-gray-800">
+                المساعد التأميني
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -197,7 +213,7 @@ const SmartChat: React.FC<SmartChatProps> = ({
             style={{ borderColor: "rgba(0,0,0,0.08)" }}
           >
             <div className="text-[12px] text-emerald-900/80 mb-1">
-              الأسئلة الجاهزة
+              الأسئلة الجاهزة (السجلات التأمينية)
             </div>
             <div className="flex flex-wrap gap-2">
               {QUICK_ITEMS.map((it) => (
@@ -261,7 +277,7 @@ const SmartChat: React.FC<SmartChatProps> = ({
             style={{
               borderColor: "rgba(0,0,0,0.1)",
               paddingBottom: "calc(env(safe-area-inset-bottom, 0px) + 8px)",
-              background: "rgba(255,255,255,0.9)",
+              background: "rgba(255,255,255,0.85)",
             }}
           >
             <button
@@ -284,7 +300,7 @@ const SmartChat: React.FC<SmartChatProps> = ({
               rows={2}
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder="اكتب رسالتك..."
+              placeholder="اكتب استفسارك التأميني..."
               className="flex-1 rounded-2xl border px-3 py-2 outline-none resize-y"
               style={{
                 borderColor: "rgba(0,0,0,0.1)",
@@ -312,4 +328,4 @@ const SmartChat: React.FC<SmartChatProps> = ({
   );
 };
 
-export default SmartChat;
+export default SmartInsuranceChat;

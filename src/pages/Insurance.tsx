@@ -10,12 +10,14 @@ import {
   Shield,
   Pill,
   Bell,
+  BellRing,
   Users,
   UserPlus,
   ClipboardList,
   CalendarDays,
   Filter,
   History,
+  Bot,
 } from "lucide-react";
 import clsx from "clsx";
 import {
@@ -29,7 +31,7 @@ import {
   LabelList,
   Cell,
 } from "recharts";
-import SmartChat from "@/components/SmartChat";
+import SmartInsuranceChat from "@/components/SmartInsuranceChat.tsx";
 
 /* ===================== Theme ===================== */
 const theme = {
@@ -43,7 +45,7 @@ const pageBg =
   "linear-gradient(180deg,#F5F9F7 0%,#ECF5F2 100%), radial-gradient(800px 500px at 12% 8%, rgba(169,222,214,0.18) 0%, transparent 60%)";
 const headerGrad = `linear-gradient(135deg, ${theme.brandDark} 0%, #0B3B3C 60%, ${theme.brandDark} 100%)`;
 
-// UI tokens for the pretty sorting bar
+// UI tokens (some ما زالت للاستخدام العام)
 const ui = {
   mintBg: "linear-gradient(180deg,#F0FDF9 0%, #E6FAF4 100%)",
   mintBorder: "#f1e6cfff",
@@ -96,7 +98,7 @@ const coMatches = (rowCompany: string, selected: string) => {
   return a === b || a.startsWith(b) || b.startsWith(a) || a.includes(b);
 };
 
-// abbreviate long company strings for axis/tooltip (more aggressive)
+// ✅ abbreviate using LAST 3 words for axis only
 const abbreviateCompany = (s: string, maxWords = 3) => {
   const cleaned = (s || "")
     .replace(/\d{3,}/g, " ")
@@ -104,11 +106,13 @@ const abbreviateCompany = (s: string, maxWords = 3) => {
     .replace(/\b(?:Co(?:mpany)?|Co-?Operative|Insurance|Ltd|Limited)\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
+
+  if (!cleaned) return "";
   const parts = cleaned.split(" ");
-  if (parts.length === 0) return "";
-  return (
-    parts.slice(0, maxWords).join(" ") + (parts.length > maxWords ? " …" : "")
-  );
+  if (parts.length <= maxWords) return parts.join(" ");
+
+  const tail = parts.slice(-maxWords);
+  return "… " + tail.join(" ");
 };
 
 const brief = (s: string, max = 120) => {
@@ -142,6 +146,54 @@ function lighten(hex: string, amt = 0.15) {
   return `#${H(F(r))}${H(F(g))}${H(F(b))}`;
 }
 
+// CSV escape helper (للملف الذي يفتح في Excel)
+const csvEscape = (value: string) => {
+  const v = value ?? "";
+  const needsQuotes = /[",\n\r]/.test(v);
+  const safe = v.replace(/"/g, '""');
+  return needsQuotes ? `"${safe}"` : safe;
+};
+
+/* ===== ربط صفحة السجلات الدوائية بالإشعارات ===== */
+
+type NotiKind = "طبي" | "تأمين" | "دواء";
+type NotiSeverity = "طارئ" | "تنبيه" | "معلومة";
+
+type Noti = {
+  id: string;
+  kind: NotiKind;
+  severity: NotiSeverity;
+  // بقية الحقول غير مهمة للحساب
+};
+
+const RAW_BASE_NOTI = (import.meta as any).env?.VITE_API_BASE || "";
+const API_BASE_NOTI = String(RAW_BASE_NOTI || "");
+const USE_PROXY_NOTI = !API_BASE_NOTI;
+
+const NOTI_LIST_ENDPOINT = USE_PROXY_NOTI
+  ? "/api/notifications"
+  : "/notifications";
+
+const joinUrlNoti = (b: string, p: string) =>
+  b ? `${b.replace(/\/$/, "")}${p.startsWith("/") ? p : `/${p}`}` : p;
+
+// يرجع عدد إشعارات الأدوية
+async function fetchDrugAlertsCount(): Promise<number> {
+  const full = joinUrlNoti(API_BASE_NOTI, NOTI_LIST_ENDPOINT);
+  const url = new URL(full, window.location.origin);
+
+  const r = await fetch(url.toString(), { credentials: "include" });
+  if (!r.ok) throw new Error(await r.text());
+
+  const list = (await r.json()) as Noti[];
+
+  // 🟢 احسبي فقط الإشعارات التي نوعها "دواء"
+  // لو حبيتي الطارئة فقط استخدمي && n.severity === "طارئ"
+  const drugAlerts = list.filter((n) => n.kind === "دواء");
+
+  return drugAlerts.length;
+}
+
 /* ===================== Types ===================== */
 type InsRow = {
   inv_no: string;
@@ -165,6 +217,24 @@ type RecordsResponse = {
   alerts_count: number;
   records: InsRow[];
 };
+
+/* أعمدة التصدير */
+const EXPORT_COLUMNS: { key: keyof InsRow; label: string }[] = [
+  { key: "inv_no", label: "رقم المطالبة" },
+  { key: "company", label: "الشركة" },
+  { key: "claim_type", label: "نوع المطالبة" },
+  { key: "treatment_date", label: "تاريخ العلاج" },
+  { key: "pay_to", label: "المستفيد" },
+  { key: "gross_amount_no_vat", label: "إجمالي بدون ضريبة" },
+  { key: "vat_amount", label: "الضريبة" },
+  { key: "discount", label: "الخصم" },
+  { key: "deductible", label: "التحمّل" },
+  { key: "special_discount", label: "خصم خاص" },
+  { key: "net_amount", label: "الصافي" },
+  { key: "emer_ind", label: "عاجل؟" },
+  { key: "refer_ind", label: "تحويل؟" },
+  { key: "ai_analysis", label: "تحليل AI" },
+];
 
 /* ===================== API ===================== */
 const RAW_BASE = (import.meta as any).env?.VITE_API_BASE || "";
@@ -204,6 +274,20 @@ export default function Insurance() {
   const [loading, setLoading] = useState(true);
   const [firstLoadDone, setFirstLoadDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [alertsCount, setAlertsCount] = useState<number>(0);
+  // عدد التنبيهات الخاصة بالأدوية من نظام الإشعارات
+  const [notifDrugAlerts, setNotifDrugAlerts] = useState(0);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const c = await fetchDrugAlertsCount();
+        setNotifDrugAlerts(c);
+      } catch (e) {
+        console.error("فشل تحميل عدد تنبيهات الأدوية من صفحة الإشعارات", e);
+      }
+    })();
+  }, []);
 
   // data
   const [rows, setRows] = useState<InsRow[]>([]);
@@ -255,6 +339,9 @@ export default function Insurance() {
   const [rangeMin, setRangeMin] = useState<string>("");
   const [rangeMax, setRangeMax] = useState<string>("");
   const [pageSize, setPageSize] = useState<number>(30);
+
+  // export state
+  const [exporting, setExporting] = useState(false);
 
   // refs
   const inputRef = useRef<HTMLInputElement>(null);
@@ -438,7 +525,7 @@ export default function Insurance() {
   // re-fetch when filters change
   useEffect(() => {
     fetchChartData();
-    // only fetch cards if currently shown (to avoid initial heavy render)
+    // only fetch cards if currently shown
     if (showCards) fetchData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
@@ -537,6 +624,61 @@ export default function Insurance() {
     window.dispatchEvent(new CustomEvent("ins:cleared"));
   }
 
+  /* ===================== Export handler ===================== */
+  async function handleExport() {
+    try {
+      setExporting(true);
+
+      const params: Record<string, string> = {};
+      if (hasSearched && q.trim()) params.q = q.trim();
+      if (fCompany) params.company = fCompany;
+      if (fClaim) params.claim_type = fClaim;
+      if (date) params.date = date;
+
+      // نجلب نفس البيانات حسب الفلاتر الحالية
+      const data = await httpFetch(params);
+      const list = data.records || [];
+
+      if (!list.length) {
+        alert("لا توجد بيانات لتصديرها بناءً على التصفية أو البحث الحالي.");
+        return;
+      }
+
+      const headerRow = EXPORT_COLUMNS.map((c) => csvEscape(c.label)).join(",");
+      const bodyRows = list.map((row) =>
+        EXPORT_COLUMNS.map((c) =>
+          csvEscape(
+            String(
+              (row as any)[c.key] !== undefined && (row as any)[c.key] !== null
+                ? (row as any)[c.key]
+                : ""
+            )
+          )
+        ).join(",")
+      );
+
+      const csvContent = [headerRow, ...bodyRows].join("\r\n");
+      const blob = new Blob(["\uFEFF" + csvContent], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `insurance_records_${new Date()
+        .toISOString()
+        .slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert("حدث خطأ أثناء التصدير. يرجى المحاولة لاحقًا.");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   /* Suggestions source */
   const suggestItems = useMemo(() => {
     const key = nrm(q);
@@ -613,7 +755,7 @@ export default function Insurance() {
     return "عدد المطالبات لكل شركة";
   }, [chartMode, fCompany, fClaim]);
 
-  // KPI figures should reflect currently filtered table (or global if nothing selected)
+  // KPI figures
   const kpiRows = useMemo(
     () => (fCompany || fClaim || hasSearched ? rows : chartRows),
     [rows, chartRows, fCompany, fClaim, hasSearched]
@@ -649,6 +791,11 @@ export default function Insurance() {
                 label="السجلات الدوائية"
                 onClick={() => navigate("/drugs")}
               />
+              <SideItem
+                icon={<BellRing className="size-4" />}
+                label="الإشعارات"
+                onClick={() => navigate("/notifications")}
+              />
             </nav>
           </div>
           <div className="mt-auto px-4 pt-10 pb-6">
@@ -682,11 +829,27 @@ export default function Insurance() {
               <Home className="size-5" style={{ color: theme.brandDark }} />
             </button>
 
-            <div className="text-2xl md:text-3xl font-semibold">
-              السجلات التأمينية
+            <div className="text-2xl md:text-3xl font-semibold flex items-center justify-between gap-3">
+              <span>السجلات التأمينية</span>
+              {/* زر التصدير في أعلى الصفحة */}
+              <button
+                onClick={handleExport}
+                disabled={exporting}
+                className="relative -top-2 ml-14 inline-flex items-center gap-3 px-4 py-2 rounded-full text-sm font-semibold bg-white/90 text-emerald-900 border border-white/70 shadow-sm hover:bg-white disabled:opacity-60 disabled:cursor-not-allowed"
+                title="تصدير السجلات الحالية إلى ملف Excel"
+              >
+                {exporting ? (
+                  <span>جاري التصدير…</span>
+                ) : (
+                  <>
+                    <span>تصدير إلى Excel</span>
+                    <ClipboardList className="size-4 text-emerald-700" />
+                  </>
+                )}
+              </button>
             </div>
 
-            {/* Always-visible Gregorian date */}
+            {/* Gregorian date */}
             <div className="mt-4 flex flex-wrap items-center gap-2">
               <SingleDateChip
                 value={date}
@@ -716,7 +879,7 @@ export default function Insurance() {
               setActiveIdx={setActiveIdx}
             />
 
-            {/* Filters (after search) */}
+            {/* Filters */}
             {hasSearched && (
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {(ctxMode === "company" || ctxMode === "claim") && (
@@ -778,6 +941,7 @@ export default function Insurance() {
               <div className="h-[460px] bg-white rounded-2xl animate-pulse" />
             </div>
           ) : null}
+
           {/* KPI Cards */}
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 relative z-0">
             <KpiCard
@@ -800,13 +964,7 @@ export default function Insurance() {
             />
             <KpiCard
               title="عدد التنبيهات"
-              value={
-                kpiRows.filter(
-                  (r) =>
-                    (r.emer_ind || "").toUpperCase() === "Y" ||
-                    (r.refer_ind || "").toUpperCase() === "Y"
-                ).length
-              }
+              value={notifDrugAlerts}
               color="#0E9F6E"
               icon={<Bell />}
             />
@@ -829,7 +987,13 @@ export default function Insurance() {
                 </button>
               )}
             </div>
-            <div style={{ width: "100%", height: 360, minWidth: 320 }}>
+            <div
+              style={{
+                width: "100%",
+                height: 360,
+                minWidth: 320,
+              }}
+            >
               {chartData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <BarChart
@@ -893,17 +1057,23 @@ export default function Insurance() {
                       width={36}
                     />
                     <RTooltip
+                      wrapperStyle={{
+                        maxWidth: 420,
+                      }}
                       contentStyle={{
                         backgroundColor: "white",
                         borderRadius: 12,
                         boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
                         border: "1px solid #E5E7EB",
+                        maxWidth: 420,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
                       }}
                       formatter={(v: any) => [String(v), "عدد المطالبات"]}
                       labelFormatter={(l: any) =>
                         chartMode === "byClaimForCompany"
                           ? `النوع: ${l}`
-                          : `الشركة: ${abbreviateCompany(String(l))}`
+                          : `الشركة: ${String(l)}`
                       }
                     />
                     <Bar dataKey="count" barSize={44} radius={[12, 12, 8, 8]}>
@@ -943,7 +1113,10 @@ export default function Insurance() {
           {/* Sorting / show cards bar */}
           <div
             className="mt-4 rounded-2xl p-4 shadow-soft flex flex-wrap items-center gap-3 border"
-            style={{ background: ui.mintBg, borderColor: ui.mintBorder }}
+            style={{
+              background: "#E6F7EF",
+              borderColor: "#BFDCD1",
+            }}
           >
             <div className="flex items-center gap-2">
               <span className="text-sm" style={{ color: ui.hint }}>
@@ -1077,8 +1250,11 @@ export default function Insurance() {
             <div className="mt-6 grid grid-cols-1 gap-4 print:gap-2">
               {firstLoadDone && !loading && rows.length === 0 ? (
                 <div
-                  className="h-[140px] grid place-items-center text-neutral-500 text-sm border rounded-2xl bg-white"
-                  style={{ borderColor: theme.border }}
+                  className="h-[140px] grid place-items-center text-neutral-600 text-sm rounded-2xl"
+                  style={{
+                    background: "#E7F8EF",
+                    border: "1px solid #C6EAD7",
+                  }}
                 >
                   لا توجد بيانات مطابقة — غيّري التاريخ أو البحث.
                 </div>
@@ -1090,8 +1266,8 @@ export default function Insurance() {
             </div>
           )}
 
-          {/* Smart chat button / drawer */}
-          <SmartChat
+          {/* Smart chat */}
+          <SmartInsuranceChat
             side="right"
             themeColor={theme.brandDark}
             context="insurance"
@@ -1119,7 +1295,7 @@ function SideItem({
       onClick={onClick}
       className={clsx(
         "w-full flex items-center justify-between gap-3 rounded-xl px-4 py-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-300",
-        active ? "text-[#0B3B3C] border border-black/10" : "hover:bg:black/5"
+        active ? "text-[#0B3B3C] border border-black/10" : "hover:bg-black/5"
       )}
       style={active ? { backgroundColor: "#E6FFF4" } : {}}
       aria-current={active ? "page" : undefined}
@@ -1320,8 +1496,12 @@ function RecordCard({ r }: { r: InsRow }) {
 
   return (
     <div
-      className="rounded-2xl border bg:white p-4 shadow-sm print:shadow-none print:p-3 transition-transform duration-150 hover:-translate-y-[2px] hover:shadow-lg relative overflow-hidden"
-      style={{ borderColor: theme.border }}
+      className="shadow-sm print:shadow-none print:p-3 transition-transform duration-150 hover:-translate-y-[2px] hover:shadow-lg relative overflow-hidden p-4"
+      style={{
+        background: "#F6FBF8",
+        border: "1px solid #D7E7DF",
+        borderRadius: "18px",
+      }}
     >
       <div
         className="absolute right-0 top-0 h-full w-1.5"
@@ -1330,7 +1510,7 @@ function RecordCard({ r }: { r: InsRow }) {
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {r.claim_type &&
           badge(`نوع المطالبة: ${toTitle(r.claim_type)}`, theme.brandDark)}
-        {(r.emer_ind || "").toUpperCase() === "Y" && badge("عاجل", amber.dark)}
+        {(r.emer_ind || "").toUpperCase() === "Y" && badge("عاجل", amber.mid)}
         {(r.refer_ind || "").toUpperCase() === "Y" && badge("تحويل", "#2563EB")}
         {r.company && badge(toTitle(r.company), amber.dark)}
       </div>
@@ -1355,14 +1535,34 @@ function RecordCard({ r }: { r: InsRow }) {
         <Field label="التحمّل" value={String(r.deductible ?? "—")} />
         <Field label="خصم خاص" value={String(r.special_discount ?? "—")} />
         <Field label="الصافي" value={String(r.net_amount ?? "—")} />
-        {r.ai_analysis && (
-          <Field
-            label="تحليل AI"
-            value={brief(r.ai_analysis, 180)}
-            full
-            multiline
-          />
-        )}
+      </div>
+
+      {/* AI Analysis block */}
+      <div
+        className="mt-3 rounded-2xl px-3 py-3 flex items-start gap-3"
+        style={{
+          background: "#E7F8EF",
+          border: "1px solid #C6EAD7",
+        }}
+      >
+        <div className="w-8 h-8 rounded-xl bg-[rgba(14,107,67,0.06)] flex items-center justify-center">
+          <Bot className="size-4 text-emerald-700" />
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[13px] font-semibold text-neutral-800">
+              تحليل AI
+            </span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-100">
+              تجريبي
+            </span>
+          </div>
+          <p className="mt-1 text-[12px] leading-5 text-neutral-600">
+            {r.ai_analysis
+              ? brief(r.ai_analysis, 200)
+              : "No analysis yet — will be added by AI Agent."}
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -1387,7 +1587,10 @@ function Field({
           "rounded-2xl border px-3 py-2",
           multiline ? "whitespace-pre-wrap leading-7" : ""
         )}
-        style={{ background: theme.surfaceAlt, borderColor: theme.border }}
+        style={{
+          background: "#FBFEFC",
+          borderColor: "#DDE8E2",
+        }}
         title={typeof value === "string" ? value : undefined}
       >
         {value || "—"}
@@ -1455,7 +1658,7 @@ function SingleDateChip({
   );
 }
 
-/* Search bar with suggestions (compact) */
+/* Search bar with suggestions */
 function SearchBar(props: {
   q: string;
   setQ: (v: string) => void;

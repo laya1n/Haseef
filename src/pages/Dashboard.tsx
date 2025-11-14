@@ -21,6 +21,7 @@ import {
   ChevronUp,
   AlertTriangle,
   CornerDownRight,
+  Bot,
 } from "lucide-react";
 import clsx from "clsx";
 import {
@@ -267,6 +268,14 @@ function parsePowerQuery(raw: string): Pq {
   return out;
 }
 
+/* ===================== CSV helper ===================== */
+const csvEscape = (value: string) => {
+  const v = value ?? "";
+  const needsQuotes = /[",\n\r]/.test(v);
+  const safe = v.replace(/"/g, '""');
+  return needsQuotes ? `"${safe}"` : safe;
+};
+
 /* ===================== Types ===================== */
 type MedRow = {
   id?: number | string;
@@ -287,6 +296,19 @@ type RecordsResponse = {
   alerts_count: number;
   records: MedRow[];
 };
+
+const EXPORT_COLUMNS: { key: keyof MedRow; label: string }[] = [
+  { key: "doctor_name", label: "اسم الطبيب" },
+  { key: "patient_name", label: "اسم المريض" },
+  { key: "treatment_date", label: "تاريخ العلاج" },
+  { key: "ICD10CODE", label: "ICD10" },
+  { key: "chief_complaint", label: "الشكوى الرئيسية" },
+  { key: "claim_type", label: "نوع المطالبة" },
+  { key: "contract", label: "العقد" },
+  { key: "emer_ind", label: "عاجل؟" },
+  { key: "refer_ind", label: "تحويل؟" },
+  { key: "ai_analysis", label: "تحليل AI" },
+];
 
 /* ===================== API ===================== */
 const RAW_BASE = (import.meta as any).env?.VITE_API_BASE || "";
@@ -322,6 +344,17 @@ export default function MedicalRecords() {
   const [loading, setLoading] = useState(true);
   const [firstLoadDone, setFirstLoadDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // شريط البطاقات (مثل التأمين)
+  const [showCards, setShowCards] = useState(false);
+
+const cardOptions = [10, 20, 30, 50, 100];
+
+const [rangeMin, setRangeMin] = useState("");
+const [rangeMax, setRangeMax] = useState("");
+  const [priorityMenuOpen, setPriorityMenuOpen] = useState(false);
+  const [cardsMenuOpen, setCardsMenuOpen] = useState(false);
+
+  
 
   // data
   const [rows, setRows] = useState<MedRow[]>([]);
@@ -369,6 +402,17 @@ export default function MedicalRecords() {
   // chart focus
   const [selectedName, setSelectedName] = useState<string>("");
 
+  // export state
+  const [exporting, setExporting] = useState(false);
+
+  // priority list state
+  const [prioOpen, setPrioOpen] = useState(true);
+  const [prioLimit, setPrioLimit] = useState(8);
+
+  // control bar state (مثل التأمين)
+  const [cardLimit, setCardLimit] = useState(24);
+  const [showPriorityOnly, setShowPriorityOnly] = useState(false);
+
   // refs
   const inputRef = useRef<HTMLInputElement>(null);
   const suggestRef = useRef<HTMLDivElement>(null);
@@ -377,6 +421,7 @@ export default function MedicalRecords() {
     () => dateFrom || dateTo || "",
     [dateFrom, dateTo]
   );
+ 
 
   /* expose setters for instant UI update from SearchBar.apply */
   useEffect(() => {
@@ -758,6 +803,8 @@ export default function MedicalRecords() {
     setDateTo("");
     setHasSearched(false);
     setSelectedName("");
+    setShowPriorityOnly(false);
+    setCardLimit(24);
     fetchData({
       keepLoading: true,
       override: {
@@ -780,6 +827,61 @@ export default function MedicalRecords() {
       },
     });
     window.dispatchEvent(new CustomEvent("med:cleared"));
+  }
+
+  /* ======== Export handler ======== */
+  async function handleExport() {
+    try {
+      setExporting(true);
+
+      const params: Record<string, string> = {};
+      if (hasSearched && q.trim()) params.q = q.trim();
+      if (fDoctor) params.doctor = fDoctor;
+      if (fPatient) params.patient = fPatient;
+      if (singleDate) params.date = singleDate;
+      if (selIcd) params.icd = selIcd;
+
+      const data = await httpFetch(params);
+      const list = data.records || [];
+
+      if (!list.length) {
+        alert("لا توجد سجلات لتصديرها بناءً على التصفية أو البحث الحالي.");
+        return;
+      }
+
+      const headerRow = EXPORT_COLUMNS.map((c) => csvEscape(c.label)).join(",");
+      const bodyRows = list.map((row) =>
+        EXPORT_COLUMNS.map((c) =>
+          csvEscape(
+            String(
+              (row as any)[c.key] !== undefined && (row as any)[c.key] !== null
+                ? (row as any)[c.key]
+                : ""
+            )
+          )
+        ).join(",")
+      );
+
+      const csvContent = [headerRow, ...bodyRows].join("\r\n");
+      const blob = new Blob(["\uFEFF" + csvContent], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `medical_records_${new Date()
+        .toISOString()
+        .slice(0, 10)}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      console.error(e);
+      alert("حدث خطأ أثناء التصدير. يرجى المحاولة لاحقًا.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   /* ===================== Search Bar ===================== */
@@ -821,7 +923,6 @@ export default function MedicalRecords() {
       setActiveIdx,
     } = props;
 
-    // keep scroll position in suggest list to avoid jumping
     const listRef = React.useRef<HTMLUListElement>(null);
     const savedScroll = React.useRef(0);
     React.useEffect(() => {
@@ -837,7 +938,6 @@ export default function MedicalRecords() {
       setQ(pretty);
       setHasSearched(true);
 
-      // update filters immediately to refresh header/chart
       if (s.kind === "doctor") {
         (window as any).setFDoctor?.(pretty);
       }
@@ -877,14 +977,12 @@ export default function MedicalRecords() {
                   e.target.value.replace(/^[\s"“”'‚‹›«»]+|[\s"“”'‚‹›«»]+$/g, "")
                 );
                 setShowSuggest(true);
-                // keep current activeIdx to avoid scroll reset
               }}
               onMouseDown={() => {
                 if (q.trim()) setQ("");
               }}
               onFocus={() => {
                 setShowSuggest(true);
-                // DO NOT reset activeIdx here (prevents jump)
               }}
               onKeyDown={(e) => {
                 if (
@@ -988,7 +1086,6 @@ export default function MedicalRecords() {
                             i === activeIdx && "bg-emerald-50"
                           )}
                           style={{ color: "#0B0F14" }}
-                          // NOTE: removed onMouseEnter to avoid re-renders that reset scroll
                           onMouseDown={(e) => {
                             e.preventDefault();
                             apply(s);
@@ -1058,7 +1155,6 @@ export default function MedicalRecords() {
             بحث
           </button>
 
-          {/* 🔶 عرض الكل بدل مسح */}
           <button
             onClick={onShowAll}
             className="h-11 px-4 rounded-xl text-sm border text-white hover:bg-white/10"
@@ -1136,7 +1232,7 @@ export default function MedicalRecords() {
     return "عدد السجلات لكل طبيب";
   }, [chartMode, fDoctor, fPatient]);
 
-  // ======= Priority list (red, neat) =======
+  // Priority list
   const priorityItems = useMemo(() => {
     const items = rows
       .filter(
@@ -1157,7 +1253,6 @@ export default function MedicalRecords() {
             : "",
         complaint: brief(r.chief_complaint, 120),
       }));
-    // sort: عاجل first, then تحويل, then by date desc
     const score = (k: string) => (k === "عاجل" ? 2 : k === "تحويل" ? 1 : 0);
     return items.sort(
       (a, b) =>
@@ -1166,8 +1261,27 @@ export default function MedicalRecords() {
     );
   }, [rows]);
 
-  const [prioOpen, setPrioOpen] = useState(true);
-  const [prioLimit, setPrioLimit] = useState(8);
+  // KPI rows (مثل صفحة التأمين)
+  const kpiRows = useMemo(
+    () =>
+      fDoctor || fPatient || hasSearched || singleDate || selIcd
+        ? rows
+        : chartRows,
+    [rows, chartRows, fDoctor, fPatient, hasSearched, singleDate, selIcd]
+  );
+
+  // rows الخاصة بالبطاقات (تتأثر بالـ control bar)
+  const visibleRows = useMemo(() => {
+    let base = rows;
+    if (showPriorityOnly) {
+      base = rows.filter(
+        (r) =>
+          (r.emer_ind || "").toUpperCase() === "Y" ||
+          (r.refer_ind || "").toUpperCase() === "Y"
+      );
+    }
+    return base.slice(0, cardLimit);
+  }, [rows, showPriorityOnly, cardLimit]);
 
   return (
     <div className="min-h-screen" style={{ background: pageBg }}>
@@ -1237,8 +1351,24 @@ export default function MedicalRecords() {
               <Home className="size-5" style={{ color: theme.brandDark }} />
             </button>
 
-            <div className="text-2xl md:text-3xl font-semibold">
-              السجلات الطبية
+            {/* عنوان + زر التصدير */}
+            <div className="text-2xl md:text-3xl font-semibold flex items-center justify-between gap-3">
+              <span>السجلات الطبية</span>
+              <button
+                onClick={handleExport}
+                disabled={exporting}
+                className="relative -top-2 ml-14 inline-flex items-center gap-3 px-4 py-2 rounded-full text-sm font-semibold bg-white/90 text-emerald-900 border border-white/70 shadow-sm hover:bg-white disabled:opacity-60 disabled:cursor-not-allowed"
+                title="تصدير السجلات الحالية إلى ملف Excel"
+              >
+                {exporting ? (
+                  <span>جاري التصدير…</span>
+                ) : (
+                  <>
+                    <span>تصدير إلى Excel</span>
+                    <ClipboardList className="size-4 text-emerald-700" />
+                  </>
+                )}
+              </button>
             </div>
 
             {/* Always-visible date */}
@@ -1317,63 +1447,66 @@ export default function MedicalRecords() {
               setActiveIdx={setActiveIdx}
             />
 
-            {/* Filters (after search) */}
-            {hasSearched && (
-              <div className="mt-3 flex flex-wrap items-center gap-2">
-                {(ctxMode === "doctor" ||
-                  ctxMode === "icd" ||
-                  ctxMode === "patient") && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-[rgba(14,107,67,0.12)] backdrop-blur-sm shadow-sm">
-                    <span className="inline-flex items-center gap-2 text-[13px] font-medium text-white bg-white/20 px-2.5 py-1 rounded-full">
-                      <span className="w-6 h-6 grid place-items-center rounded-lg bg-white/25">
-                        <Filter className="size-4 text-white" />
-                      </span>
-                      فلترة
-                    </span>
+           {/* Filters (after search) */}
+{hasSearched && (
+  <div className="mt-3 flex flex-wrap items-center gap-2">
+    {(ctxMode === "doctor" ||
+      ctxMode === "icd" ||
+      ctxMode === "patient") && (
+      <div className="flex items-center gap-2 px-3 py-2 rounded-2xl bg-[rgba(14,107,67,0.12)] backdrop-blur-sm shadow-sm">
+        {/* شارة فلترة */}
+        <span className="inline-flex items-center gap-2 text-[13px] font-medium text-white bg-white/20 px-2.5 py-1 rounded-full">
+          <span className="w-6 h-6 grid place-items-center rounded-lg bg-white/25">
+            <Filter className="size-4 text-white" />
+          </span>
+          فلترة
+        </span>
 
-                    {ctxMode === "doctor" && (
-                      <SoftMenuSelect
-                        value={fPatient}
-                        onChange={(v) => {
-                          setFPatient(v);
-                          setSelectedName("");
-                        }}
-                        title="حسب المريض"
-                        placeholder="كل المرضى"
-                        options={masterPatientsByDoctor[fDoctor] || []}
-                      />
-                    )}
+        {/* حسب المريض عندما يكون السياق طبيب */}
+        {ctxMode === "doctor" && (
+          <SoftMenuSelect
+            value={fPatient}
+            onChange={(v) => {
+              setFPatient(v);
+              setSelectedName("");
+            }}
+            title="حسب المريض"
+            placeholder="كل المرضى"
+            options={masterPatientsByDoctor[fDoctor] || []}
+          />
+        )}
 
-                    {ctxMode === "icd" && (
-                      <SoftMenuSelect
-                        value={fDoctor}
-                        onChange={(v) => {
-                          setFDoctor(v);
-                          setSelectedName("");
-                        }}
-                        title="حسب الطبيب"
-                        placeholder="كل الأطباء"
-                        options={ctxDoctors}
-                      />
-                    )}
+        {/* حسب الطبيب عندما يكون السياق ICD */}
+        {ctxMode === "icd" && (
+          <SoftMenuSelect
+            value={fDoctor}
+            onChange={(v) => {
+              setFDoctor(v);
+              setSelectedName("");
+            }}
+            title="حسب الطبيب"
+            placeholder="كل الأطباء"
+            options={ctxDoctors}
+          />
+        )}
 
-                    {ctxMode === "patient" && (
-                      <SoftMenuSelect
-                        value={fDoctor}
-                        onChange={(v) => {
-                          setFDoctor(v);
-                          setSelectedName("");
-                        }}
-                        title="حسب الطبيب"
-                        placeholder="كل الأطباء"
-                        options={masterDoctorsByPatient[fPatient] || []}
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+        {/* حسب الطبيب عندما يكون السياق مريض */}
+        {ctxMode === "patient" && (
+          <SoftMenuSelect
+            value={fDoctor}
+            onChange={(v) => {
+              setFDoctor(v);
+              setSelectedName("");
+            }}
+            title="حسب الطبيب"
+            placeholder="كل الأطباء"
+            options={masterDoctorsByPatient[fPatient] || []}
+          />
+        )}
+      </div>
+    )}
+  </div>
+)}
 
           {/* Errors / skeleton */}
           {err && (
@@ -1382,7 +1515,7 @@ export default function MedicalRecords() {
             </div>
           )}
 
-          {(!firstLoadDone || loading) && rows.length === 0 ? (
+          {(!firstLoadDone || loading) && kpiRows.length === 0 ? (
             <div className="mt-6 grid gap-4">
               <div className="h-20 bg-white rounded-2xl animate-pulse" />
               <div className="h-80 bg-white rounded-2xl animate-pulse" />
@@ -1393,29 +1526,30 @@ export default function MedicalRecords() {
           {/* KPI Cards */}
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 relative z-0">
             <KpiCard
-              title="عدد السجلات"
-              value={kpis(rows).total}
-              color="#3B82F6"
-              icon={<ClipboardList />}
-            />
-            <KpiCard
-              title="عدد الأطباء"
-              value={kpis(rows).doctors}
-              color="#D97706"
-              icon={<UserPlus />}
-            />
-            <KpiCard
-              title="عدد المرضى"
-              value={kpis(rows).patients}
-              color="#E05252"
-              icon={<Users />}
-            />
-            <KpiCard
-              title="عدد التنبيهات"
-              value={kpis(rows).alerts}
-              color="#0E9F6E"
-              icon={<Bell />}
-            />
+  title="عدد السجلات"
+  value={kpis(kpiRows).total}
+  color="#3B82F6"
+  icon={<ClipboardList />}
+/>
+<KpiCard
+  title="عدد الأطباء"
+  value={kpis(kpiRows).doctors}
+  color="#D97706"
+  icon={<UserPlus />}
+/>
+<KpiCard
+  title="عدد المرضى"
+  value={kpis(kpiRows).patients}
+  color="#E05252"
+  icon={<Users />}
+/>
+<KpiCard
+  title="عدد التنبيهات"
+  value={kpis(kpiRows).alerts}
+  color="#0E9F6E"
+  icon={<Bell />}
+/>
+
           </div>
 
           {/* Priority List (Red) */}
@@ -1492,7 +1626,7 @@ export default function MedicalRecords() {
             </div>
           )}
 
-          {/* Chart (Orange bars) */}
+          {/* Chart */}
           <div
             className="mt-6 rounded-2xl bg-white shadow-soft p-5 border"
             style={{ borderColor: theme.border }}
@@ -1565,11 +1699,17 @@ export default function MedicalRecords() {
                       width={36}
                     />
                     <RTooltip
+                      wrapperStyle={{
+                        maxWidth: 420,
+                      }}
                       contentStyle={{
                         backgroundColor: "white",
                         borderRadius: 12,
                         boxShadow: "0 6px 18px rgba(0,0,0,0.08)",
                         border: "1px solid #E5E7EB",
+                        maxWidth: 420,
+                        whiteSpace: "pre-wrap",
+                        wordBreak: "break-word",
                       }}
                       formatter={(v: any) => [
                         String(v),
@@ -1617,31 +1757,196 @@ export default function MedicalRecords() {
             </div>
           </div>
 
-          {/* Detailed Cards */}
-          <div className="mt-6 grid grid-cols-1 gap-4 print:gap-2">
-            {firstLoadDone && !loading && rows.length === 0 ? (
-              <div
-                className="h-[140px] grid place-items-center text-neutral-500 text-sm border rounded-2xl bg-white"
-                style={{ borderColor: theme.border }}
-              >
-                لا توجد بيانات مطابقة — غيّري التاريخ أو البحث.
-              </div>
-            ) : (
-              rows.map((r) => (
-                <RecordCard
-                  key={String(r.id ?? r.patient_name + r.treatment_date)}
-                  r={r}
-                />
-              ))
-            )}
-          </div>
+                    {/* 🔶 شريط التحكم في البطاقات – نفس شكل سجلات الأدوية */}
+          <div
+            className="mt-4 rounded-3xl border px-4 py-3 bg-[#E6F7EF]"
+            style={{ borderColor: "#BFDCD1" }}
+          >
+            <div className="flex flex-wrap items-center gap-3 justify-between">
+              {/* يمين: أولوية + صافي بين من/إلى */}
+              <div className="flex flex-wrap items-center gap-3 text-[12px] text-neutral-700">
+                {/* الأولوية كمنسدلة */}
+                <div className="relative flex items-center gap-2">
+                  <span className="text-neutral-700">الأولوية:</span>
+                  <button
+                    type="button"
+                    onClick={() => setPriorityMenuOpen((v) => !v)}
+                    className="inline-flex items-center justify-between min-w-[140px] px-3 h-9 rounded-full bg-white border border-emerald-100 text-[12px] text-neutral-800 shadow-sm"
+                  >
+                    <span>
+                      {showPriorityOnly ? "عاجل/تحويل أولاً" : "بدون"}
+                    </span>
+                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50">
+                      <svg
+                        width="12"
+                        height="12"
+                        viewBox="0 0 20 20"
+                        fill="none"
+                        className="text-emerald-700"
+                      >
+                        <path
+                          d="M5.5 7.5L10 12l4.5-4.5"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </span>
+                  </button>
 
-          {/* Chat button / drawer */}
-          <SmartChat
-            placement="left"
-            themeColor={theme.brandDark}
-            context="medical"
-          />
+                  {priorityMenuOpen && (
+                    <div className="absolute mt-1 right-0 z-20 w-full rounded-2xl bg-white shadow-lg border border-emerald-100 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPriorityOnly(false);
+                          setPriorityMenuOpen(false);
+                        }}
+                        className="w-full px-3 py-2 text-right text-[12px] hover:bg-emerald-50"
+                      >
+                        بدون
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowPriorityOnly(true);
+                          setPriorityMenuOpen(false);
+                        }}
+                        className="w-full px-3 py-2 text-right text-[12px] hover:bg-emerald-50"
+                      >
+                        عاجل/تحويل أولاً
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* صافي بين من / إلى – شكل واجهة فقط الآن */}
+                <div className="flex items-center gap-2">
+                  <span className="text-neutral-700">صافي بين</span>
+                  <input
+                    value={rangeMin}
+                    onChange={(e) => setRangeMin(e.target.value)}
+                    placeholder="من"
+                    className="h-9 w-28 rounded-full bg-white border border-emerald-100 px-3 text-[12px] outline-none focus:ring-2 focus:ring-emerald-300"
+                  />
+                  <span className="text-neutral-500">-</span>
+                  <input
+                    value={rangeMax}
+                    onChange={(e) => setRangeMax(e.target.value)}
+                    placeholder="إلى"
+                    className="h-9 w-28 rounded-full bg-white border border-emerald-100 px-3 text-[12px] outline-none focus:ring-2 focus:ring-emerald-300"
+                  />
+                </div>
+              </div>
+
+              {/* يسار: عدد البطاقات + زر عرض / إخفاء */}
+              <div className="flex flex-wrap items-center gap-3 text-[12px]">
+                {/* عدد البطاقات */}
+                <div className="flex items-center gap-2">
+                  <span className="text-neutral-700">عدد البطاقات</span>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      className="inline-flex items-center justify-between w-[80px] px-3 h-9 rounded-full bg-white border border-emerald-100 text-[12px] text-neutral-800 shadow-sm"
+                      onClick={() => setCardsMenuOpen((v) => !v)}
+                    >
+                      <span>{cardLimit}</span>
+                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-50">
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 20 20"
+                          fill="none"
+                          className="text-emerald-700"
+                        >
+                          <path
+                            d="M5.5 7.5L10 12l4.5-4.5"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                      </span>
+                    </button>
+
+                    {cardsMenuOpen && (
+                      <div className="absolute mt-1 right-0 z-20 w-full rounded-2xl bg-white shadow-lg border border-emerald-100 overflow-hidden">
+                        {cardOptions.map((n) => (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={() => {
+                              setCardLimit(n);
+                              setCardsMenuOpen(false);
+                            }}
+                            className="w-full px-3 py-2 text-right text-[12px] hover:bg-emerald-50"
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* زر عرض / إخفاء */}
+                {!showCards ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowCards(true)}
+                    className="inline-flex items-center justify-center px-6 h-9 rounded-full bg-emerald-500 text-white text-[12px] font-semibold shadow-sm hover:bg-emerald-600"
+                  >
+                    عرض
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowCards(false)}
+                    className="inline-flex items-center justify-center px-6 h-9 rounded-full bg-white text-emerald-800 text-[12px] font-semibold border border-emerald-200 hover:bg-emerald-50"
+                  >
+                    إخفاء البطاقات
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* نص مساعدة أسفل الشريط */}
+            <p className="mt-2 text-[11px] text-emerald-900/70 text-right">
+              {showCards
+                ? "البطاقات معروضة. يمكنك تغيير عددها أو أولوية العرض من الشريط أعلاه."
+                : "اضغطي «عرض» لإظهار البطاقات التفصيلية بحسب الفلاتر الحالية."}
+            </p>
+          </div>
+                    {/* بطاقات السجلات التفصيلية */}
+                              {showCards && (
+            <div className="mt-6 grid grid-cols-1 gap-4 print:gap-2">
+              {firstLoadDone && !loading && rows.length === 0 ? (
+                <div
+                  className="h-[140px] grid place-items-center text-neutral-500 text-sm border rounded-2xl bg-white"
+                  style={{ borderColor: theme.border }}
+                >
+                  لا توجد بيانات مطابقة — غيّري التاريخ أو البحث.
+                </div>
+              ) : visibleRows.length === 0 && rows.length > 0 ? (
+                <div
+                  className="h-[140px] grid place-items-center text-neutral-500 text-sm border rounded-2xl bg-white"
+                  style={{ borderColor: theme.border }}
+                >
+                  لا توجد بيانات مطابقة لإعدادات شريط التحكم — جرّبي إلغاء
+                  "الأولوية" أو زيادة عدد البطاقات.
+                </div>
+              ) : (
+                visibleRows.map((r) => (
+                  <RecordCard
+                    key={String(r.id ?? r.patient_name + r.treatment_date)}
+                    r={r}
+                  />
+                ))
+              )}
+            </div>
+          )}
         </main>
       </div>
     </div>
@@ -1653,17 +1958,26 @@ function kpis(list: MedRow[]) {
   const byDoc: Record<string, number> = {};
   const patSet = new Set<string>();
   let alerts = 0;
+
   list.forEach((r) => {
     const n = firstNameOf(r.doctor_name || "");
-    if (n && n.toLowerCase() !== "nan") byDoc[n] = (byDoc[n] ?? 0) + 1;
+    if (n && n.toLowerCase() !== "nan") {
+      byDoc[n] = (byDoc[n] ?? 0) + 1;
+    }
+
     const pn = toTitle(r.patient_name);
-    if (pn && pn.toLowerCase() !== "nan") patSet.add(pn);
+    if (pn && pn.toLowerCase() !== "nan") {
+      patSet.add(pn);
+    }
+
     if (
       (r.emer_ind || "").toUpperCase() === "Y" ||
       (r.refer_ind || "").toUpperCase() === "Y"
-    )
+    ) {
       alerts++;
+    }
   });
+
   return {
     total: list.length,
     doctors: Object.keys(byDoc).length,
@@ -1700,7 +2014,7 @@ function SideItem({
   );
 }
 
-// KPI Card with same-hue gradient
+// KPI Card
 function KpiCard({
   title,
   value,
@@ -1768,71 +2082,93 @@ function KpiCard({
 function SoftMenuSelect({
   value,
   onChange,
-  options,
-  placeholder,
   title,
+  placeholder,
+  options,
 }: {
   value: string;
   onChange: (v: string) => void;
-  options: string[];
+  title: string;
   placeholder: string;
-  title?: string;
+  options: string[];
 }) {
   const [open, setOpen] = useState(false);
-  const btnRef = useRef<HTMLButtonElement>(null);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const uniq = Array.from(new Set(options.filter(Boolean)));
+  const allOptions = [placeholder, ...uniq];
+
+  const currentLabel = value || placeholder;
+
   return (
-    <div className="relative z-[60]">
+    <div ref={wrapRef} className="relative min-w-[180px]">
+      <div className="mb-1 text-[11px] text-white/80">{title}</div>
+
       <button
-        ref={btnRef}
-        title={title}
+        type="button"
         onClick={() => setOpen((o) => !o)}
-        className="h-9 px-3 pr-8 rounded-full text-sm font-semibold shadow-sm text-white bg-[rgba(14,107,67,0.30)] hover:bg-[rgba(14,107,67,0.38)] focus:outline-none focus:ring-2 focus:ring-emerald-300"
-        style={{
-          backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 20 20'%3E%3Cpath fill='%23FFFFFF' d='M5.5 7.5l4.5 5 4.5-5z'/%3E%3C/svg%3E\")",
-          backgroundRepeat: "no-repeat",
-          backgroundPosition: "left 10px center",
-        }}
+        className="h-9 w-full rounded-full bg-white text-[13px] flex items-center justify-between px-3 shadow-sm border border-emerald-100 hover:bg-emerald-50/70 transition"
       >
-        {value || placeholder}
+        <span className="truncate text-right text-emerald-900">
+          {currentLabel}
+        </span>
+        <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#E0F7F2] border border-[#aee7d8]">
+          <svg width="12" height="12" viewBox="0 0 20 20" fill="none">
+            <path
+              d="M5.5 7.5L10 12l4.5-4.5"
+              stroke="#059669"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </span>
       </button>
 
       {open && (
-        <div
-          className="absolute z-[70] mt-2 w-[220px] rounded-xl overflow-hidden shadow-xl bg-white/95 backdrop-blur-md border border-emerald-200/40"
-          onMouseLeave={() => setOpen(false)}
-        >
-          <button
-            className="w-full text-right px-3 py-2 text-sm font-medium bg-emerald-50/60 text-emerald-900"
-            onClick={() => {
-              onChange("");
-              setOpen(false);
-            }}
-          >
-            {placeholder}
-          </button>
-          <ul className="max-h-[240px] overflow-auto">
-            {options.map((o) => (
-              <li key={o}>
+        <div className="absolute mt-1 right-0 z-40 w-full rounded-2xl bg-white border border-emerald-100 shadow-lg overflow-hidden">
+          <div className="max-h-60 overflow-auto">
+            {allOptions.map((opt) => {
+              const isAll = opt === placeholder;
+              const val = isAll ? "" : opt;
+              const active = value === val || (!value && isAll);
+              return (
                 <button
-                  className="w-full text-right px-3 py-2 text-[13px] hover:bg-emerald-50 text-[#0B0F14]"
+                  key={opt || "__all"}
+                  type="button"
                   onClick={() => {
-                    onChange(o);
+                    onChange(val);
                     setOpen(false);
                   }}
-                  title={o}
+                  className={clsx(
+                    "w-full text-right px-3 py-2 text-[13px] transition",
+                    active
+                      ? "bg-emerald-50 text-emerald-900 font-semibold"
+                      : "hover:bg-emerald-50/70 text-neutral-800"
+                  )}
                 >
-                  {o}
+                  {opt}
                 </button>
-              </li>
-            ))}
-          </ul>
+              );
+            })}
+          </div>
         </div>
       )}
     </div>
   );
 }
 
+// كرت السجل الطبي
 function RecordCard({ r }: { r: MedRow }) {
   const statusColor =
     (r.emer_ind || "").toUpperCase() === "Y"
@@ -1852,8 +2188,12 @@ function RecordCard({ r }: { r: MedRow }) {
 
   return (
     <div
-      className="rounded-2xl border bg:white p-4 shadow-sm print:shadow-none print:p-3 transition-transform duration-150 hover:-translate-y-[2px] hover:shadow-lg relative overflow-hidden"
-      style={{ borderColor: theme.border }}
+      className="shadow-sm print:shadow-none print:p-3 transition-transform duration-150 hover:-translate-y-[2px] hover:shadow-lg relative overflow-hidden p-4"
+      style={{
+        background: "#F6FBF8",
+        border: "1px solid #D7E7DF",
+        borderRadius: "18px",
+      }}
     >
       <div
         className="absolute right-0 top-0 h-full w-1.5"
@@ -1861,15 +2201,15 @@ function RecordCard({ r }: { r: MedRow }) {
       />
       <div className="flex flex-wrap items-center gap-2 mb-3">
         {r.claim_type &&
-          badge(`نوع المطالبة: ${r.claim_type}`, theme.brandDark)}
+          badge(`نوع المطالبة: ${toTitle(r.claim_type)}`, theme.brandDark)}
         {(r.emer_ind || "").toUpperCase() === "Y" && badge("عاجل", "#B45309")}
         {(r.refer_ind || "").toUpperCase() === "Y" && badge("تحويل", "#2563EB")}
         {r.contract && badge("يوجد عقد", "#065F46")}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <Field label="اسم الطبيب" value={r.doctor_name} />
-        <Field label="اسم المريض" value={r.patient_name} />
+        <Field label="اسم الطبيب" value={toTitle(r.doctor_name)} />
+        <Field label="اسم المريض" value={toTitle(r.patient_name)} />
         <Field
           label="التاريخ"
           value={
@@ -1884,9 +2224,33 @@ function RecordCard({ r }: { r: MedRow }) {
           multiline
         />
         {r.contract && <Field label="العقد" value={r.contract} full />}
-        {r.ai_analysis && (
-          <Field label="تحليل AI" value={r.ai_analysis} full multiline />
-        )}
+      </div>
+
+      <div
+        className="mt-3 rounded-2xl px-3 py-3 flex items-start gap-3"
+        style={{
+          background: "#E7F8EF",
+          border: "1px solid #C6EAD7",
+        }}
+      >
+        <div className="w-8 h-8 rounded-xl bg-[rgba(14,107,67,0.06)] flex items-center justify-center">
+          <Bot className="size-4 text-emerald-700" />
+        </div>
+        <div className="flex-1">
+          <div className="flex items-center justify_between gap-2">
+            <span className="text-[13px] font-semibold text-neutral-800">
+              تحليل AI
+            </span>
+            <span className="px-2 py-0.5 rounded-full text-[10px] bg-emerald-50 text-emerald-800 border border-emerald-100">
+              تجريبي
+            </span>
+          </div>
+          <p className="mt-1 text-[12px] leading-5 text-neutral-600">
+            {r.ai_analysis
+              ? brief(r.ai_analysis, 200)
+              : "No analysis yet — will be added by AI Agent."}
+          </p>
+        </div>
       </div>
     </div>
   );
@@ -1911,7 +2275,10 @@ function Field({
           "rounded-2xl border px-3 py-2",
           multiline ? "whitespace-pre-wrap leading-7" : ""
         )}
-        style={{ background: theme.surfaceAlt, borderColor: theme.border }}
+        style={{
+          background: "#FBFEFC",
+          borderColor: "#DDE8E2",
+        }}
         title={typeof value === "string" ? value : undefined}
       >
         {value || "—"}
@@ -1968,7 +2335,7 @@ function SingleDateChip({
               e.stopPropagation();
               onClear();
             }}
-            className="ml-1 grid place-items-center و-5 h-5 rounded-full bg-black/10 hover:bg-black/20 text-[12px]"
+            className="ml-1 grid place-items-center w-5 h-5 rounded-full bg-black/10 hover:bg-black/20 text-[12px]"
             title="مسح التاريخ"
           >
             ×

@@ -130,10 +130,10 @@ const SmartChat: React.FC<SmartChatProps> = ({
           background:
             "linear-gradient(135deg, #0D16D1 0%, #2341ff 60%, #5f7bff 120%)",
         }}
-        aria-label="المساعد الذكي"
+        aria-label="المساعد الطبي"
       >
         <Bot className="size-5" />
-        <span className="font-semibold hidden sm:inline">المساعد الذكي</span>
+        <span className="font-semibold hidden sm:inline">المساعد الطبي</span>
       </button>
 
       {/* نافذة الشات */}
@@ -169,7 +169,7 @@ const SmartChat: React.FC<SmartChatProps> = ({
               >
                 <Bot className="size-5" />
               </span>
-              <div className="font-semibold text-gray-800">المساعد الذكي</div>
+              <div className="font-semibold text-gray-800">المساعد الطبي</div>
             </div>
             <div className="flex items-center gap-2">
               <button
